@@ -5,3 +5,9 @@ authors = ["elpinal"]
 edition = "2018"
 
 [dependencies]
+failure = "0.1.3"
+
+[dev-dependencies.cargo-husky]
+version = "1"
+default-features = false
+features = ["precommit-hook", "run-cargo-clippy", "run-cargo-fmt"]
