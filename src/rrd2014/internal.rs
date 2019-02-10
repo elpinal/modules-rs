@@ -89,4 +89,40 @@ impl Type {
         }
         ty
     }
+
+    /// Creates an n-ary universal type.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use modules::rrd2014::internal::*;
+    /// use Type::Int;
+    /// use Kind::*;
+    ///
+    /// assert_eq!(Type::forall(None, Int), Int);
+    ///
+    /// assert_eq!(
+    ///     Type::forall(vec![Mono], Int),
+    ///     Type::Forall(Mono, Box::new(Int))
+    /// );
+    ///
+    /// assert_eq!(
+    ///     Type::forall(vec![Mono, Mono], Int),
+    ///     Type::Forall(Mono, Box::new(Type::Forall(Mono, Box::new(Int))))
+    /// );
+    ///
+    /// assert_eq!(
+    ///     Type::forall(vec![Kind::fun(Mono, Mono), Mono], Int),
+    ///     Type::Forall(Mono, Box::new(Type::Forall(Kind::fun(Mono, Mono), Box::new(Int))))
+    /// );
+    /// ```
+    pub fn forall<I>(ks: I, mut ty: Type) -> Self
+    where
+        I: IntoIterator<Item = Kind>,
+    {
+        for k in ks.into_iter() {
+            ty = Type::Forall(k, Box::new(ty))
+        }
+        ty
+    }
 }
