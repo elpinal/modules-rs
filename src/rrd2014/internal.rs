@@ -90,14 +90,11 @@ impl Type {
     ///     Type::Some(Mono, Box::new(Type::Some(Kind::fun(Mono, Mono), Box::new(Int))))
     /// );
     /// ```
-    pub fn some<I>(ks: I, mut ty: Type) -> Self
+    pub fn some<I>(ks: I, ty: Type) -> Self
     where
         I: IntoIterator<Item = Kind>,
     {
-        for k in ks.into_iter() {
-            ty = Type::Some(k, Box::new(ty))
-        }
-        ty
+        ks.into_iter().fold(ty, |ty, k| Type::Some(k, Box::new(ty)))
     }
 
     /// Creates an n-ary universal type.
@@ -126,14 +123,12 @@ impl Type {
     ///     Type::Forall(Mono, Box::new(Type::Forall(Kind::fun(Mono, Mono), Box::new(Int))))
     /// );
     /// ```
-    pub fn forall<I>(ks: I, mut ty: Type) -> Self
+    pub fn forall<I>(ks: I, ty: Type) -> Self
     where
         I: IntoIterator<Item = Kind>,
     {
-        for k in ks.into_iter() {
-            ty = Type::Forall(k, Box::new(ty))
-        }
-        ty
+        ks.into_iter()
+            .fold(ty, |ty, k| Type::Forall(k, Box::new(ty)))
     }
 }
 
