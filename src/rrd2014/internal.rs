@@ -27,8 +27,13 @@ pub enum Type {
     Var(Variable),
     Fun(Box<Type>, Box<Type>),
     Record(Record<Type>),
+
+    /// A universal type.
     Forall(Kind, Box<Type>),
+
+    /// An existential type.
     Some(Kind, Box<Type>),
+
     Abs(Kind, Box<Type>),
     App(Box<Type>, Box<Type>),
     Int,
