@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::iter::FromIterator;
 
+use failure::Fail;
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Name(String);
 
@@ -568,16 +570,35 @@ impl Term {
     }
 }
 
+#[derive(Debug, Fail, PartialEq)]
+enum EnvError {
+    #[fail(display = "unbound type variable: {:?}", _0)]
+    UnboundTypeVariable(Variable),
+
+    #[fail(display = "unbound variable: {:?}", _0)]
+    UnboundVariable(Variable),
+}
+
 impl<T> Env<T> {
-    fn lookup_type(&self, v: Variable) -> Result<Kind, ()> {
-        self.tenv.iter().rev().nth(v.0).cloned().ok_or(())
+    fn lookup_type(&self, v: Variable) -> Result<Kind, EnvError> {
+        self.tenv
+            .iter()
+            .rev()
+            .nth(v.0)
+            .cloned()
+            .ok_or_else(|| EnvError::UnboundTypeVariable(v))
     }
 
-    fn lookup_value(&self, v: Variable) -> Result<T, ()>
+    fn lookup_value(&self, v: Variable) -> Result<T, EnvError>
     where
         T: Clone,
     {
-        self.venv.iter().rev().nth(v.0).cloned().ok_or(())
+        self.venv
+            .iter()
+            .rev()
+            .nth(v.0)
+            .cloned()
+            .ok_or_else(|| EnvError::UnboundVariable(v))
     }
 
     fn insert_type(&mut self, k: Kind)
@@ -864,8 +885,18 @@ mod tests {
         assert_eq!(env.lookup_type(Variable(1)), Ok(Kind::fun(Mono, Mono)));
         assert_eq!(env.lookup_type(Variable(2)), Ok(Mono));
 
+        assert_eq!(
+            env.lookup_type(Variable(3)),
+            Err(EnvError::UnboundTypeVariable(Variable(3)))
+        );
+
         assert_eq!(env.lookup_value(Variable(0)), Ok(Type::var(7)));
         assert_eq!(env.lookup_value(Variable(1)), Ok(Type::var(4)));
+
+        assert_eq!(
+            env.lookup_value(Variable(2)),
+            Err(EnvError::UnboundVariable(Variable(2)))
+        );
     }
 
     #[test]
