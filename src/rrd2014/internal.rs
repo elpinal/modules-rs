@@ -135,6 +135,18 @@ impl<T: Shift> Shift for Vec<T> {
     }
 }
 
+impl<'a> From<&'a str> for Name {
+    fn from(s: &str) -> Self {
+        Name(s.to_string())
+    }
+}
+
+impl From<String> for Name {
+    fn from(s: String) -> Self {
+        Name(s)
+    }
+}
+
 impl Name {
     pub fn new(s: String) -> Self {
         Name(s)
@@ -1009,6 +1021,38 @@ mod tests {
                 venv: vec![Type::var(1)].into_iter().map(Some).collect(),
                 nmap: HashMap::new(),
             }
+        );
+    }
+
+    #[test]
+    fn env_by_name() {
+        use Kind::*;
+        use Type::*;
+
+        let mut env = Env {
+            tenv: vec![Mono],
+            venv: vec![],
+            nmap: HashMap::new(),
+        };
+
+        env.insert_value(Name::from("x"), Int);
+        assert_eq!(env.lookup_value_by_name(&Name::from("x")), Ok(Int));
+
+        env.insert_value(Name::from("y"), Type::fun(Int, Int));
+        assert_eq!(env.lookup_value_by_name(&Name::from("x")), Ok(Int));
+        assert_eq!(
+            env.lookup_value_by_name(&Name::from("y")),
+            Ok(Type::fun(Int, Int))
+        );
+
+        env.insert_value(Name::from("x"), Type::fun(Int, Type::var(0)));
+        assert_eq!(
+            env.lookup_value_by_name(&Name::from("x")),
+            Ok(Type::fun(Int, Type::var(0)))
+        );
+        assert_eq!(
+            env.lookup_value_by_name(&Name::from("y")),
+            Ok(Type::fun(Int, Int))
         );
     }
 }
