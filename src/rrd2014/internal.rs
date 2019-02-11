@@ -72,7 +72,7 @@ pub enum Term {
 #[derive(Debug, PartialEq)]
 struct Env<T> {
     tenv: Vec<Kind>,
-    venv: Vec<T>,
+    venv: Vec<Option<T>>,
 }
 
 trait Shift {
@@ -87,6 +87,14 @@ impl Shift for Type {
 
 impl Shift for Kind {
     fn shift(&mut self, _: isize) {}
+}
+
+impl<T: Shift> Shift for Option<T> {
+    fn shift(&mut self, d: isize) {
+        if let Some(x) = self.as_mut() {
+            x.shift(d);
+        }
+    }
 }
 
 impl Variable {
@@ -598,6 +606,7 @@ impl<T> Env<T> {
             .rev()
             .nth(v.0)
             .cloned()
+            .ok_or_else(|| EnvError::UnboundVariable(v))?
             .ok_or_else(|| EnvError::UnboundVariable(v))
     }
 
@@ -611,7 +620,11 @@ impl<T> Env<T> {
     }
 
     fn insert_value(&mut self, x: T) {
-        self.venv.push(x);
+        self.venv.push(Some(x));
+    }
+
+    fn insert_dummy_value(&mut self) {
+        self.venv.push(None);
     }
 }
 
@@ -866,7 +879,10 @@ mod tests {
 
         let env = Env {
             tenv: vec![Mono, Kind::fun(Mono, Mono)],
-            venv: vec![Type::var(3), Type::var(6)],
+            venv: vec![Type::var(3), Type::var(6)]
+                .into_iter()
+                .map(Some)
+                .collect(),
         };
 
         assert_eq!(env.lookup_type(Variable(0)), Ok(Kind::fun(Mono, Mono)));
@@ -905,14 +921,14 @@ mod tests {
 
         let mut env = Env {
             tenv: vec![Mono],
-            venv: vec![Type::var(0)],
+            venv: vec![Type::var(0)].into_iter().map(Some).collect(),
         };
         env.insert_type(Mono);
         assert_eq!(
             env,
             Env {
                 tenv: vec![Mono, Mono],
-                venv: vec![Type::var(1)]
+                venv: vec![Type::var(1)].into_iter().map(Some).collect(),
             }
         );
     }
