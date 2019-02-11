@@ -6,7 +6,13 @@
 
 pub mod internal;
 
-use internal::Name;
+use std::collections::HashMap;
+
+use failure::Fail;
+
+use internal::Kind as IKind;
+use internal::Type as IType;
+use internal::{Label, Name};
 
 struct Ident(Name);
 
@@ -63,4 +69,44 @@ enum Decl {
     Module(Ident, Sig),
     Signature(Ident, Sig),
     Include(Sig),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct Quantified<T> {
+    qs: Vec<IKind>,
+    body: T,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct Existential<T>(Quantified<T>);
+
+#[derive(Clone, Debug, PartialEq)]
+struct Universal<T>(Quantified<T>);
+
+type AbstractSig = Existential<SemanticSig>;
+
+#[derive(Clone, Debug, PartialEq)]
+struct Fun(SemanticSig, AbstractSig);
+
+#[derive(Clone, Debug, PartialEq)]
+enum SemanticSig {
+    AtomicTerm(IType),
+    AtomicType(IType, IKind),
+    AtomicSig(Box<AbstractSig>),
+    StructureSig(HashMap<Label, SemanticSig>),
+    FunctorSig(Universal<Box<Fun>>),
+}
+
+#[derive(Debug, Fail, PartialEq)]
+#[fail(display = "not atomic semantic signature: {:?}", _0)]
+struct NonAtomicError(SemanticSig);
+
+impl SemanticSig {
+    fn atomic(&self) -> Result<(), NonAtomicError> {
+        use SemanticSig::*;
+        match *self {
+            AtomicTerm(..) | AtomicType(..) | AtomicSig(..) => Ok(()),
+            _ => Err(NonAtomicError(self.clone())),
+        }
+    }
 }
