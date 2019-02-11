@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use failure::Fail;
 
 use internal::Kind as IKind;
+use internal::Shift;
 use internal::Type as IType;
 use internal::{Label, Name};
 
@@ -95,6 +96,49 @@ enum SemanticSig {
     AtomicSig(Box<AbstractSig>),
     StructureSig(HashMap<Label, SemanticSig>),
     FunctorSig(Universal<Box<Fun>>),
+}
+
+impl<T: Shift> Shift for Quantified<T> {
+    fn shift_above(&mut self, c: usize, d: isize) {
+        let c1 = c + self.qs.len();
+        self.qs.shift_above(c1, d);
+        self.body.shift_above(c1, d);
+    }
+}
+
+impl<T: Shift> Shift for Existential<T> {
+    fn shift_above(&mut self, c: usize, d: isize) {
+        self.0.shift_above(c, d);
+    }
+}
+
+impl<T: Shift> Shift for Universal<T> {
+    fn shift_above(&mut self, c: usize, d: isize) {
+        self.0.shift_above(c, d);
+    }
+}
+
+impl Shift for Fun {
+    fn shift_above(&mut self, c: usize, d: isize) {
+        self.0.shift_above(c, d);
+        self.1.shift_above(c, d);
+    }
+}
+
+impl Shift for SemanticSig {
+    fn shift_above(&mut self, c: usize, d: isize) {
+        use SemanticSig::*;
+        match *self {
+            AtomicTerm(ref mut ty) => ty.shift_above(c, d),
+            AtomicType(ref mut ty, ref mut k) => {
+                ty.shift_above(c, d);
+                k.shift_above(c, d);
+            }
+            AtomicSig(ref mut asig) => asig.shift_above(c, d),
+            StructureSig(ref mut m) => m.values_mut().for_each(|ssig| ssig.shift_above(c, d)),
+            FunctorSig(ref mut u) => u.shift_above(c, d),
+        }
+    }
 }
 
 type Env = internal::Env<SemanticSig>;

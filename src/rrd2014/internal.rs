@@ -100,11 +100,25 @@ impl Shift for Kind {
     fn shift_above(&mut self, _: usize, _: isize) {}
 }
 
+impl<T: Shift> Shift for Box<T> {
+    fn shift_above(&mut self, c: usize, d: isize) {
+        (**self).shift_above(c, d)
+    }
+}
+
 impl<T: Shift> Shift for Option<T> {
     fn shift_above(&mut self, c: usize, d: isize) {
         if let Some(x) = self.as_mut() {
             x.shift_above(c, d);
         }
+    }
+}
+
+impl<T: Shift> Shift for Vec<T> {
+    fn shift_above(&mut self, c: usize, d: isize) {
+        self.iter_mut().for_each(|x| {
+            x.shift_above(c, d);
+        });
     }
 }
 
