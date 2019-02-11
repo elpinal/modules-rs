@@ -12,6 +12,7 @@ use failure::Fail;
 
 use internal::Kind as IKind;
 use internal::Shift;
+use internal::Term as ITerm;
 use internal::Type as IType;
 use internal::{Label, Name};
 
@@ -98,6 +99,15 @@ enum SemanticSig {
 }
 
 type Env = internal::Env<SemanticSig>;
+
+#[derive(Debug, Fail, PartialEq)]
+enum TypeError {
+    #[fail(display = "not function type: {:?}", _0)]
+    NotFunction(IType),
+
+    #[fail(display = "type mismatch: {:?} and {:?}", _0, _0)]
+    TypeMismatch(IType, IType),
+}
 
 impl<T: Shift> Shift for Quantified<T> {
     fn shift_above(&mut self, c: usize, d: isize) {
@@ -211,6 +221,35 @@ impl Elaboration for Type {
                 k2.mono()?;
                 Ok((IType::fun(ty1, ty2), IKind::Mono))
             }
+            _ => unimplemented!(),
+        }
+    }
+}
+
+impl Elaboration for Expr {
+    type Output = (ITerm, IType);
+    type Error = TypeError;
+
+    fn elaborate(self, env: &mut Env) -> Result<Self::Output, Self::Error> {
+        use Expr::*;
+        match self {
+            // Abs(Ident, Box<Expr>),
+            App(e1, e2) => {
+                let (t1, ty1) = e1.elaborate(env)?;
+                let (t2, ty2) = e2.elaborate(env)?;
+                match ty1 {
+                    IType::Fun(ty11, ty12) => {
+                        if *ty11 == ty2 {
+                            Ok((ITerm::app(t1, t2), *ty12))
+                        } else {
+                            Err(TypeError::TypeMismatch(*ty11, ty2))
+                        }
+                    }
+                    _ => Err(TypeError::NotFunction(ty1)),
+                }
+            }
+            // Path(Path),
+            Int(n) => Ok((ITerm::Int(n), IType::Int)),
             _ => unimplemented!(),
         }
     }
