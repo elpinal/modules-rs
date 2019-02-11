@@ -97,6 +97,15 @@ enum SemanticSig {
     FunctorSig(Universal<Box<Fun>>),
 }
 
+type Env = internal::Env<SemanticSig>;
+
+trait Elaboration {
+    type Output;
+    type Error;
+
+    fn elaborate(self, env: &mut Env) -> Result<Self::Output, Self::Error>;
+}
+
 #[derive(Debug, Fail, PartialEq)]
 #[fail(display = "not atomic semantic signature: {:?}", _0)]
 struct NonAtomicError(SemanticSig);
@@ -107,6 +116,37 @@ impl SemanticSig {
         match *self {
             AtomicTerm(..) | AtomicType(..) | AtomicSig(..) => Ok(()),
             _ => Err(NonAtomicError(self.clone())),
+        }
+    }
+}
+
+impl Elaboration for Kind {
+    type Output = IKind;
+    type Error = ();
+
+    fn elaborate(self, _: &mut Env) -> Result<Self::Output, Self::Error> {
+        match self {
+            Kind::Mono => Ok(IKind::Mono),
+        }
+    }
+}
+
+impl Elaboration for Type {
+    type Output = (IType, IKind);
+    type Error = internal::NotMonoError;
+
+    fn elaborate(self, env: &mut Env) -> Result<Self::Output, Self::Error> {
+        use Type::*;
+        match self {
+            Int => Ok((IType::Int, IKind::Mono)),
+            Fun(ty1, ty2) => {
+                let (ty1, k1) = ty1.elaborate(env)?;
+                k1.mono()?;
+                let (ty2, k2) = ty2.elaborate(env)?;
+                k2.mono()?;
+                Ok((IType::fun(ty1, ty2), IKind::Mono))
+            }
+            _ => unimplemented!(),
         }
     }
 }

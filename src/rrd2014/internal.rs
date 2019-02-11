@@ -70,12 +70,12 @@ pub enum Term {
 }
 
 #[derive(Debug, PartialEq)]
-struct Env<T> {
+pub struct Env<T> {
     tenv: Vec<Kind>,
     venv: Vec<Option<T>>,
 }
 
-trait Shift {
+pub trait Shift {
     fn shift(&mut self, d: isize);
 }
 
@@ -118,12 +118,23 @@ impl Record<Type> {
     }
 }
 
+#[derive(Debug, Fail, PartialEq)]
+#[fail(display = "not mono kind: {:?}", _0)]
+pub struct NotMonoError(Kind);
+
 impl Kind {
     pub fn fun(k1: Kind, k2: Kind) -> Self {
         Kind::Fun(Box::new(k1), Box::new(k2))
     }
 
     fn map<F>(&mut self, _: &F, _: usize) {}
+
+    pub fn mono(&self) -> Result<(), NotMonoError> {
+        match *self {
+            Kind::Mono => Ok(()),
+            _ => Err(NotMonoError(self.clone())),
+        }
+    }
 }
 
 impl Type {
@@ -617,6 +628,14 @@ impl<T> Env<T> {
         self.tenv.push(k);
         self.tenv.iter_mut().for_each(|k| k.shift(1));
         self.venv.iter_mut().for_each(|x| x.shift(1));
+    }
+
+    pub fn insert_types<I>(&mut self, ks: I)
+    where
+        T: Shift,
+        I: IntoIterator<Item = Kind>,
+    {
+        ks.into_iter().for_each(|k| self.insert_type(k));
     }
 
     fn insert_value(&mut self, x: T) {
