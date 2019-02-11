@@ -72,6 +72,20 @@ struct Env<T> {
     venv: Vec<T>,
 }
 
+trait Shift {
+    fn shift(&mut self, d: isize);
+}
+
+impl Shift for Type {
+    fn shift(&mut self, d: isize) {
+        self.shift_above(0, d)
+    }
+}
+
+impl Shift for Kind {
+    fn shift(&mut self, _: isize) {}
+}
+
 impl Variable {
     fn add(self, d: isize) -> Self {
         Variable(usize::try_from(isize::try_from(self.0).unwrap() + d).expect("negative index"))
@@ -221,10 +235,6 @@ impl Type {
             }
         };
         self.map(&f, c)
-    }
-
-    fn shift(&mut self, d: isize) {
-        self.shift_above(0, d)
     }
 
     fn subst(&mut self, j: usize, ty: &Type) {
