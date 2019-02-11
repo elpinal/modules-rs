@@ -67,6 +67,7 @@ pub enum Term {
     Int(isize),
 }
 
+#[derive(Debug, PartialEq)]
 struct Env<T> {
     tenv: Vec<Kind>,
     venv: Vec<T>,
@@ -835,6 +836,24 @@ mod tests {
                     ],)),
                 ),
             )
+        );
+    }
+
+    #[test]
+    fn env_insert() {
+        use Kind::*;
+
+        let mut env = Env {
+            tenv: vec![Mono],
+            venv: vec![Type::var(0)],
+        };
+        env.insert_type(Mono);
+        assert_eq!(
+            env,
+            Env {
+                tenv: vec![Mono, Mono],
+                venv: vec![Type::var(1)]
+            }
         );
     }
 }
