@@ -194,3 +194,27 @@ impl Elaboration for Type {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn env_insert() {
+        use internal::Kind::*;
+        use internal::*;
+        use SemanticSig::*;
+
+        let mut env: Env<SemanticSig> = Env::default();
+
+        env.insert_types(vec![Mono, Kind::fun(Mono, Mono)]);
+        assert_eq!(env.lookup_type(Variable::new(0)), Ok(Kind::fun(Mono, Mono)));
+        assert_eq!(env.lookup_type(Variable::new(1)), Ok(Mono));
+
+        env.insert_value(AtomicTerm(Type::Int));
+        assert_eq!(
+            env.lookup_value(Variable::new(0)),
+            Ok(AtomicTerm(Type::Int))
+        );
+    }
+}

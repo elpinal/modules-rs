@@ -75,6 +75,15 @@ pub struct Env<T> {
     venv: Vec<Option<T>>,
 }
 
+impl<T> Default for Env<T> {
+    fn default() -> Self {
+        Env {
+            tenv: vec![],
+            venv: vec![],
+        }
+    }
+}
+
 pub trait Shift {
     fn shift_above(&mut self, c: usize, d: isize);
 
@@ -123,6 +132,10 @@ impl<T: Shift> Shift for Vec<T> {
 }
 
 impl Variable {
+    pub fn new(n: usize) -> Self {
+        Variable(n)
+    }
+
     fn add(self, d: isize) -> Self {
         Variable(usize::try_from(isize::try_from(self.0).unwrap() + d).expect("negative index"))
     }
@@ -604,7 +617,7 @@ impl Term {
 }
 
 #[derive(Debug, Fail, PartialEq)]
-enum EnvError {
+pub enum EnvError {
     #[fail(display = "unbound type variable: {:?}", _0)]
     UnboundTypeVariable(Variable),
 
@@ -613,7 +626,7 @@ enum EnvError {
 }
 
 impl<T> Env<T> {
-    fn lookup_type(&self, v: Variable) -> Result<Kind, EnvError> {
+    pub fn lookup_type(&self, v: Variable) -> Result<Kind, EnvError> {
         self.tenv
             .iter()
             .rev()
@@ -622,7 +635,7 @@ impl<T> Env<T> {
             .ok_or_else(|| EnvError::UnboundTypeVariable(v))
     }
 
-    fn lookup_value(&self, v: Variable) -> Result<T, EnvError>
+    pub fn lookup_value(&self, v: Variable) -> Result<T, EnvError>
     where
         T: Clone,
     {
@@ -635,7 +648,7 @@ impl<T> Env<T> {
             .ok_or_else(|| EnvError::UnboundVariable(v))
     }
 
-    fn insert_type(&mut self, k: Kind)
+    pub fn insert_type(&mut self, k: Kind)
     where
         T: Shift,
     {
@@ -652,11 +665,11 @@ impl<T> Env<T> {
         ks.into_iter().for_each(|k| self.insert_type(k));
     }
 
-    fn insert_value(&mut self, x: T) {
+    pub fn insert_value(&mut self, x: T) {
         self.venv.push(Some(x));
     }
 
-    fn insert_dummy_value(&mut self) {
+    pub fn insert_dummy_value(&mut self) {
         self.venv.push(None);
     }
 }
