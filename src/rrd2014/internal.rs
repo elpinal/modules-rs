@@ -10,7 +10,7 @@ pub enum Label {
     Label(Name),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Variable(usize);
 
 #[derive(Debug, PartialEq)]
@@ -53,10 +53,16 @@ pub enum Term {
     Int(isize),
 }
 
+impl Variable {
+    fn add(self, d: isize) -> Self {
+        Variable(((self.0 as isize) + d) as usize)
+    }
+}
+
 impl Record<Type> {
     fn map<F>(&mut self, f: &F, c: usize)
     where
-        F: Fn(usize, &Variable) -> Type,
+        F: Fn(usize, Variable) -> Type,
     {
         self.0.values_mut().for_each(|ty| ty.map(f, c));
     }
@@ -144,11 +150,11 @@ impl Type {
 
     fn map<F>(&mut self, f: &F, c: usize)
     where
-        F: Fn(usize, &Variable) -> Type,
+        F: Fn(usize, Variable) -> Type,
     {
         use Type::*;
         match *self {
-            Var(ref v) => {
+            Var(v) => {
                 let ty = f(c, v);
                 *self = ty;
             }
@@ -175,6 +181,17 @@ impl Type {
             }
             Int => (),
         }
+    }
+
+    fn shift_above(&mut self, c: usize, d: isize) {
+        let f = |c0, v: Variable| {
+            if c0 <= v.0 {
+                Type::Var(v.add(d))
+            } else {
+                Type::Var(v)
+            }
+        };
+        self.map(&f, c)
     }
 }
 
