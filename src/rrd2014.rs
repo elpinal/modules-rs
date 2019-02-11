@@ -150,15 +150,37 @@ trait Elaboration {
 }
 
 #[derive(Debug, Fail, PartialEq)]
-#[fail(display = "not atomic semantic signature: {:?}", _0)]
-struct NonAtomicError(SemanticSig);
+enum AtomicError {
+    #[fail(display = "not atomic semantic signature: {:?}", _0)]
+    Atomic(SemanticSig),
+
+    #[fail(display = "not atomic term: {:?}", _0)]
+    AtomicTerm(SemanticSig),
+
+    #[fail(display = "not atomic type: {:?}", _0)]
+    AtomicType(SemanticSig),
+}
 
 impl SemanticSig {
-    fn atomic(&self) -> Result<(), NonAtomicError> {
+    fn atomic(&self) -> Result<(), AtomicError> {
         use SemanticSig::*;
         match *self {
             AtomicTerm(..) | AtomicType(..) | AtomicSig(..) => Ok(()),
-            _ => Err(NonAtomicError(self.clone())),
+            _ => Err(AtomicError::Atomic(self.clone())),
+        }
+    }
+
+    fn get_atomic_term(self) -> Result<IType, AtomicError> {
+        match self {
+            SemanticSig::AtomicTerm(ty) => Ok(ty),
+            _ => Err(AtomicError::AtomicTerm(self)),
+        }
+    }
+
+    fn get_atomic_type(self) -> Result<(IType, IKind), AtomicError> {
+        match self {
+            SemanticSig::AtomicType(ty, k) => Ok((ty, k)),
+            _ => Err(AtomicError::AtomicType(self)),
         }
     }
 }
