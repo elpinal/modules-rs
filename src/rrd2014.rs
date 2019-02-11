@@ -28,7 +28,6 @@ enum Type {
 }
 
 enum Expr {
-    Var(Ident),
     Abs(Ident, Box<Expr>),
     App(Box<Expr>, Box<Expr>),
     Path(Path),
@@ -98,12 +97,7 @@ enum SemanticSig {
     FunctorSig(Universal<Box<Fun>>),
 }
 
-enum ValEntry {
-    Module(SemanticSig),
-    Core(IType),
-}
-
-type Env = internal::Env<ValEntry>;
+type Env = internal::Env<SemanticSig>;
 
 impl<T: Shift> Shift for Quantified<T> {
     fn shift_above(&mut self, c: usize, d: isize) {
@@ -144,16 +138,6 @@ impl Shift for SemanticSig {
             AtomicSig(ref mut asig) => asig.shift_above(c, d),
             StructureSig(ref mut m) => m.values_mut().for_each(|ssig| ssig.shift_above(c, d)),
             FunctorSig(ref mut u) => u.shift_above(c, d),
-        }
-    }
-}
-
-impl Shift for ValEntry {
-    fn shift_above(&mut self, c: usize, d: isize) {
-        use ValEntry::*;
-        match *self {
-            Module(ref mut ssig) => ssig.shift_above(c, d),
-            Core(ref mut ty) => ty.shift_above(c, d),
         }
     }
 }
