@@ -570,14 +570,14 @@ impl Term {
 
 impl<T> Env<T> {
     fn lookup_type(&self, v: Variable) -> Result<Kind, ()> {
-        self.tenv.get(v.0).cloned().ok_or(())
+        self.tenv.iter().rev().nth(v.0).cloned().ok_or(())
     }
 
     fn lookup_value(&self, v: Variable) -> Result<T, ()>
     where
         T: Clone,
     {
-        self.venv.get(v.0).cloned().ok_or(())
+        self.venv.iter().rev().nth(v.0).cloned().ok_or(())
     }
 
     fn insert_type(&mut self, k: Kind)
@@ -837,6 +837,35 @@ mod tests {
                 ),
             )
         );
+    }
+
+    #[test]
+    fn env_lookup() {
+        use Kind::*;
+
+        let env = Env {
+            tenv: vec![Mono, Kind::fun(Mono, Mono)],
+            venv: vec![Type::var(3), Type::var(6)],
+        };
+
+        assert_eq!(env.lookup_type(Variable(0)), Ok(Kind::fun(Mono, Mono)));
+        assert_eq!(env.lookup_type(Variable(1)), Ok(Mono));
+
+        assert_eq!(env.lookup_value(Variable(0)), Ok(Type::var(6)));
+        assert_eq!(env.lookup_value(Variable(1)), Ok(Type::var(3)));
+
+        let mut env = env;
+        env.insert_type(Kind::fun(Mono, Kind::fun(Mono, Mono)));
+
+        assert_eq!(
+            env.lookup_type(Variable(0)),
+            Ok(Kind::fun(Mono, Kind::fun(Mono, Mono)))
+        );
+        assert_eq!(env.lookup_type(Variable(1)), Ok(Kind::fun(Mono, Mono)));
+        assert_eq!(env.lookup_type(Variable(2)), Ok(Mono));
+
+        assert_eq!(env.lookup_value(Variable(0)), Ok(Type::var(7)));
+        assert_eq!(env.lookup_value(Variable(1)), Ok(Type::var(4)));
     }
 
     #[test]
