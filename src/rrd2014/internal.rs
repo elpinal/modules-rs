@@ -67,6 +67,11 @@ pub enum Term {
     Int(isize),
 }
 
+struct Env<T> {
+    tenv: Vec<Kind>,
+    venv: Vec<T>,
+}
+
 impl Variable {
     fn add(self, d: isize) -> Self {
         Variable(usize::try_from(isize::try_from(self.0).unwrap() + d).expect("negative index"))
@@ -549,6 +554,28 @@ impl Term {
         } else {
             Term::let_in(Some((t1, ty)), t)
         }
+    }
+}
+
+impl<T> Env<T> {
+    fn lookup_type(&self, v: Variable) -> Result<Kind, ()> {
+        self.tenv.get(v.0).cloned().ok_or(())
+    }
+
+    fn lookup_value(&self, v: Variable) -> Result<T, ()>
+    where
+        T: Clone,
+    {
+        self.venv.get(v.0).cloned().ok_or(())
+    }
+
+    fn insert_type(&mut self, k: Kind) {
+        // TODO: shift.
+        self.tenv.push(k);
+    }
+
+    fn insert_value(&mut self, x: T) {
+        self.venv.push(x);
     }
 }
 
