@@ -1,11 +1,12 @@
 //! The internal language.
 
 use std::collections::HashMap;
+use std::convert::TryFrom;
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Name(String);
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Label {
     Label(Name),
 }
@@ -13,16 +14,16 @@ pub enum Label {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Variable(usize);
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Record<T>(HashMap<Label, T>);
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Kind {
     Mono,
     Fun(Box<Kind>, Box<Kind>),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Type {
     Var(Variable),
     Fun(Box<Type>, Box<Type>),
@@ -55,7 +56,6 @@ pub enum Term {
 
 impl Variable {
     fn add(self, d: isize) -> Self {
-        use std::convert::TryFrom;
         Variable(usize::try_from(isize::try_from(self.0).unwrap() + d).expect("negative index"))
     }
 }
@@ -201,6 +201,19 @@ impl Type {
 
     fn shift(&mut self, d: isize) {
         self.shift_above(0, d)
+    }
+
+    fn subst(&mut self, j: usize, ty: &Type) {
+        let f = |c: usize, v: Variable| {
+            if c + j == v.0 {
+                let mut ty = ty.clone();
+                ty.shift(isize::try_from(c).unwrap());
+                ty
+            } else {
+                Type::Var(v)
+            }
+        };
+        self.map(&f, 0)
     }
 }
 
@@ -398,6 +411,75 @@ mod tests {
             Type::some(vec![Mono], Type::var(4)),
             -48,
             Type::some(vec![Mono], Type::var(0))
+        );
+    }
+
+    macro_rules! assert_type_subst {
+        ($t:expr, $j:expr, $by:expr, $r:expr) => {{
+            let mut ty = $t;
+            ty.subst($j, &$by);
+            assert_eq!(ty, $r);
+        }};
+    }
+
+    #[test]
+    fn type_subst() {
+        use Kind::Mono;
+        use Type::*;
+
+        assert_type_subst!(Int, 0, Int, Int);
+        assert_type_subst!(Int, 1, Int, Int);
+
+        assert_type_subst!(Type::var(0), 0, Int, Int);
+        assert_type_subst!(Type::var(1), 0, Int, Type::var(1));
+        assert_type_subst!(Type::var(0), 1, Int, Type::var(0));
+
+        assert_type_subst!(Type::var(0), 0, Type::var(0), Type::var(0));
+        assert_type_subst!(Type::var(1), 0, Type::var(0), Type::var(1));
+        assert_type_subst!(Type::var(0), 1, Type::var(0), Type::var(0));
+        assert_type_subst!(Type::var(0), 0, Type::var(1), Type::var(1));
+        assert_type_subst!(Type::var(1), 1, Type::var(0), Type::var(0));
+
+        assert_type_subst!(
+            Type::some(vec![Mono], Type::var(0)),
+            0,
+            Type::var(0),
+            Type::some(vec![Mono], Type::var(0))
+        );
+
+        assert_type_subst!(
+            Type::some(vec![Mono], Type::var(1)),
+            0,
+            Type::var(0),
+            Type::some(vec![Mono], Type::var(1))
+        );
+
+        assert_type_subst!(
+            Type::some(vec![Mono], Type::var(1)),
+            0,
+            Type::var(106),
+            Type::some(vec![Mono], Type::var(107))
+        );
+
+        assert_type_subst!(
+            Type::some(vec![Mono], Type::var(0)),
+            0,
+            Type::var(106),
+            Type::some(vec![Mono], Type::var(0))
+        );
+
+        assert_type_subst!(
+            Type::some(vec![Mono, Mono], Type::var(1)),
+            0,
+            Type::var(106),
+            Type::some(vec![Mono, Mono], Type::var(1))
+        );
+
+        assert_type_subst!(
+            Type::some(vec![Mono, Mono], Type::var(3)),
+            1,
+            Type::var(16),
+            Type::some(vec![Mono, Mono], Type::var(18))
         );
     }
 }
