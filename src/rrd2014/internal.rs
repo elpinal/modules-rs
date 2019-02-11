@@ -55,7 +55,8 @@ pub enum Term {
 
 impl Variable {
     fn add(self, d: isize) -> Self {
-        Variable(((self.0 as isize) + d) as usize)
+        use std::convert::TryFrom;
+        Variable(usize::try_from(isize::try_from(self.0).unwrap() + d).expect("negative index"))
     }
 }
 
@@ -77,6 +78,10 @@ impl Kind {
 }
 
 impl Type {
+    fn var(n: usize) -> Self {
+        Type::Var(Variable(n))
+    }
+
     pub fn fun(ty1: Type, ty2: Type) -> Self {
         Type::Fun(Box::new(ty1), Box::new(ty2))
     }
@@ -192,6 +197,10 @@ impl Type {
             }
         };
         self.map(&f, c)
+    }
+
+    fn shift(&mut self, d: isize) {
+        self.shift_above(0, d)
     }
 }
 
@@ -312,5 +321,83 @@ impl Term {
             v.push(t);
         }
         v.into_iter().rfold(t0, Term::app)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![warn(dead_code)]
+    use super::*;
+
+    macro_rules! assert_type_shift {
+        ($t:expr, $d:expr, $r:expr) => {{
+            let mut ty = $t;
+            ty.shift($d);
+            assert_eq!(ty, $r);
+        }};
+    }
+
+    #[test]
+    fn type_shift() {
+        use Kind::Mono;
+        use Type::*;
+
+        assert_type_shift!(Int, 0, Int);
+        assert_type_shift!(Int, 1, Int);
+
+        assert_type_shift!(Type::var(0), 0, Type::var(0));
+        assert_type_shift!(Type::var(0), 1, Type::var(1));
+        assert_type_shift!(Type::var(0), 2, Type::var(2));
+
+        assert_type_shift!(Type::var(1), 2, Type::var(3));
+        assert_type_shift!(Type::var(8), 1, Type::var(9));
+
+        assert_type_shift!(
+            Type::some(vec![Mono], Type::var(0)),
+            1,
+            Type::some(vec![Mono], Type::var(0))
+        );
+
+        assert_type_shift!(
+            Type::some(vec![Mono], Type::var(1)),
+            1,
+            Type::some(vec![Mono], Type::var(2))
+        );
+
+        assert_type_shift!(
+            Type::some(vec![Mono], Type::var(8)),
+            1,
+            Type::some(vec![Mono], Type::var(9))
+        );
+
+        assert_type_shift!(
+            Type::some(vec![Mono], Type::var(48)),
+            70136,
+            Type::some(vec![Mono], Type::var(70184))
+        );
+
+        assert_type_shift!(
+            Type::some(vec![Mono], Type::var(48)),
+            -29,
+            Type::some(vec![Mono], Type::var(19))
+        );
+
+        assert_type_shift!(
+            Type::some(vec![Mono], Type::var(48)),
+            -48,
+            Type::some(vec![Mono], Type::var(0))
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn type_shift_panic() {
+        use Kind::Mono;
+
+        assert_type_shift!(
+            Type::some(vec![Mono], Type::var(4)),
+            -48,
+            Type::some(vec![Mono], Type::var(0))
+        );
     }
 }
