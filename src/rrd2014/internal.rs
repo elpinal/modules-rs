@@ -76,23 +76,34 @@ pub struct Env<T> {
 }
 
 pub trait Shift {
-    fn shift(&mut self, d: isize);
-}
+    fn shift_above(&mut self, c: usize, d: isize);
 
-impl Shift for Type {
     fn shift(&mut self, d: isize) {
         self.shift_above(0, d)
     }
 }
 
+impl Shift for Type {
+    fn shift_above(&mut self, c: usize, d: isize) {
+        let f = |c0, v: Variable| {
+            if c0 <= v.0 {
+                Type::Var(v.add(d))
+            } else {
+                Type::Var(v)
+            }
+        };
+        self.map(&f, c)
+    }
+}
+
 impl Shift for Kind {
-    fn shift(&mut self, _: isize) {}
+    fn shift_above(&mut self, _: usize, _: isize) {}
 }
 
 impl<T: Shift> Shift for Option<T> {
-    fn shift(&mut self, d: isize) {
+    fn shift_above(&mut self, c: usize, d: isize) {
         if let Some(x) = self.as_mut() {
-            x.shift(d);
+            x.shift_above(c, d);
         }
     }
 }
@@ -246,17 +257,6 @@ impl Type {
             }
             Int => (),
         }
-    }
-
-    fn shift_above(&mut self, c: usize, d: isize) {
-        let f = |c0, v: Variable| {
-            if c0 <= v.0 {
-                Type::Var(v.add(d))
-            } else {
-                Type::Var(v)
-            }
-        };
-        self.map(&f, c)
     }
 
     fn subst(&mut self, j: usize, ty: &Type) {
