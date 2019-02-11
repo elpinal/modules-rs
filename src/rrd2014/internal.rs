@@ -53,10 +53,21 @@ pub enum Term {
     Int(isize),
 }
 
+impl Record<Type> {
+    fn map<F>(&mut self, f: &F, c: usize)
+    where
+        F: Fn(usize, &Variable) -> Type,
+    {
+        self.0.values_mut().for_each(|ty| ty.map(f, c));
+    }
+}
+
 impl Kind {
     pub fn fun(k1: Kind, k2: Kind) -> Self {
         Kind::Fun(Box::new(k1), Box::new(k2))
     }
+
+    fn map<F>(&mut self, _: &F, _: usize) {}
 }
 
 impl Type {
@@ -129,6 +140,41 @@ impl Type {
     {
         ks.into_iter()
             .fold(ty, |ty, k| Type::Forall(k, Box::new(ty)))
+    }
+
+    fn map<F>(&mut self, f: &F, c: usize)
+    where
+        F: Fn(usize, &Variable) -> Type,
+    {
+        use Type::*;
+        match *self {
+            Var(ref v) => {
+                let ty = f(c, v);
+                *self = ty;
+            }
+            Fun(ref mut ty1, ref mut ty2) => {
+                ty1.map(f, c);
+                ty2.map(f, c);
+            }
+            Record(ref mut r) => r.map(f, c),
+            Forall(ref mut k, ref mut ty) => {
+                k.map(f, c); // Currently, kinds do not depend on types, though.
+                ty.map(f, c + 1);
+            }
+            Some(ref mut k, ref mut ty) => {
+                k.map(f, c); // Currently, kinds do not depend on types, though.
+                ty.map(f, c + 1);
+            }
+            Abs(ref mut k, ref mut ty) => {
+                k.map(f, c); // Currently, kinds do not depend on types, though.
+                ty.map(f, c + 1);
+            }
+            App(ref mut ty1, ref mut ty2) => {
+                ty1.map(f, c);
+                ty2.map(f, c);
+            }
+            Int => (),
+        }
     }
 }
 
