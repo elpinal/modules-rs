@@ -46,11 +46,23 @@ pub enum Term {
     Abs(Type, Box<Term>),
     App(Box<Term>, Box<Term>),
     Record(Record<Term>),
+
+    /// A projection from a record via a label.
     Proj(Box<Term>, Label),
+
+    /// A polymorphic function.
     Poly(Kind, Box<Term>),
+
+    /// An instantiation.
     Inst(Box<Term>, Type),
+
+    /// An existential introduction.
+    /// `Pack(witness, t, ty)` represents *pack [`witness`, `t`] as `ty`*.
     Pack(Type, Box<Term>, Type),
+
+    /// An existential elimination.
     Unpack(Box<Term>, Box<Term>),
+
     Int(isize),
 }
 
