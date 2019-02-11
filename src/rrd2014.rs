@@ -98,6 +98,13 @@ enum SemanticSig {
     FunctorSig(Universal<Box<Fun>>),
 }
 
+enum ValEntry {
+    Module(SemanticSig),
+    Core(IType),
+}
+
+type Env = internal::Env<ValEntry>;
+
 impl<T: Shift> Shift for Quantified<T> {
     fn shift_above(&mut self, c: usize, d: isize) {
         let c1 = c + self.qs.len();
@@ -141,7 +148,15 @@ impl Shift for SemanticSig {
     }
 }
 
-type Env = internal::Env<SemanticSig>;
+impl Shift for ValEntry {
+    fn shift_above(&mut self, c: usize, d: isize) {
+        use ValEntry::*;
+        match *self {
+            Module(ref mut ssig) => ssig.shift_above(c, d),
+            Core(ref mut ty) => ty.shift_above(c, d),
+        }
+    }
+}
 
 trait Elaboration {
     type Output;
