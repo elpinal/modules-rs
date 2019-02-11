@@ -579,9 +579,13 @@ impl<T> Env<T> {
         self.venv.get(v.0).cloned().ok_or(())
     }
 
-    fn insert_type(&mut self, k: Kind) {
-        // TODO: shift.
+    fn insert_type(&mut self, k: Kind)
+    where
+        T: Shift,
+    {
         self.tenv.push(k);
+        self.tenv.iter_mut().for_each(|k| k.shift(1));
+        self.venv.iter_mut().for_each(|x| x.shift(1));
     }
 
     fn insert_value(&mut self, x: T) {
