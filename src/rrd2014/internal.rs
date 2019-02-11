@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::iter::FromIterator;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Name(String);
@@ -72,6 +73,12 @@ impl Variable {
     }
 }
 
+impl<T> FromIterator<(Label, T)> for Record<T> {
+    fn from_iter<I: IntoIterator<Item = (Label, T)>>(iter: I) -> Self {
+        Record(HashMap::from_iter(iter))
+    }
+}
+
 impl Record<Type> {
     fn map<F>(&mut self, f: &F, c: usize)
     where
@@ -90,7 +97,7 @@ impl Kind {
 }
 
 impl Type {
-    fn var(n: usize) -> Self {
+    pub fn var(n: usize) -> Self {
         Type::Var(Variable(n))
     }
 
@@ -227,6 +234,19 @@ impl Type {
         };
         self.map(&f, 0)
     }
+
+    fn subst_shift(&mut self, j: usize, ty: &Type, d: isize) {
+        let f = |c: usize, v: Variable| {
+            if c + j == v.0 {
+                let mut ty = ty.clone();
+                ty.shift(isize::try_from(c).unwrap() + d);
+                ty
+            } else {
+                Type::Var(v)
+            }
+        };
+        self.map(&f, 0)
+    }
 }
 
 impl Term {
@@ -346,6 +366,117 @@ impl Term {
             v.push(t);
         }
         v.into_iter().rfold(t0, Term::app)
+    }
+
+    /// Creates an n-ary pack.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use modules::rrd2014::internal::*;
+    /// use Kind::*;
+    /// use Type::Int;
+    ///
+    /// assert_eq!(
+    ///     Term::pack(Term::Int(3), vec![], None, Int),
+    ///     Term::Int(3)
+    /// );
+    ///
+    /// assert_eq!(
+    ///     Term::pack(Term::Int(3), vec![Int], vec![Mono], Int),
+    ///     Term::Pack(Int, Box::new(Term::Int(3)), Type::some(vec![Mono], Int))
+    /// );
+    ///
+    /// assert_eq!(
+    ///     Term::pack(Term::Int(3), vec![Int, Int], vec![Mono, Mono], Int),
+    ///     Term::Pack(
+    ///         Int,
+    ///         Box::new(Term::Pack(Int, Box::new(Term::Int(3)), Type::some(vec![Mono], Int))),
+    ///         Type::some(vec![Mono, Mono], Int)
+    ///     )
+    /// );
+    ///
+    /// assert_eq!(
+    ///     Term::pack(
+    ///         Term::Int(2),
+    ///         vec![Type::var(576), Type::fun(Int, Int)],
+    ///         vec![Kind::fun(Mono, Mono), Mono],
+    ///         Int
+    ///     ),
+    ///     Term::Pack(
+    ///         Type::fun(Int, Int),
+    ///         Box::new(Term::Pack(
+    ///             Type::var(576),
+    ///             Box::new(Term::Int(2)),
+    ///             Type::some(vec![Kind::fun(Mono, Mono)], Int)
+    ///         )),
+    ///         Type::some(vec![Kind::fun(Mono, Mono), Mono], Int)
+    ///     )
+    /// );
+    ///
+    /// assert_eq!(
+    ///     Term::pack(
+    ///         Term::Int(2),
+    ///         vec![Type::var(576), Type::fun(Int, Int)],
+    ///         vec![Kind::fun(Mono, Mono), Mono],
+    ///         Type::fun(Type::var(0), Type::var(1))
+    ///     ),
+    ///     Term::Pack(
+    ///         Type::fun(Int, Int),
+    ///         Box::new(Term::Pack(
+    ///             Type::var(576),
+    ///             Box::new(Term::Int(2)),
+    ///             Type::some(
+    ///                 vec![Kind::fun(Mono, Mono)],
+    ///                 Type::fun(Type::var(0), Type::fun(Int, Int))
+    ///             )
+    ///         )),
+    ///         Type::some(vec![Kind::fun(Mono, Mono), Mono], Type::fun(Type::var(0), Type::var(1)))
+    ///     )
+    /// );
+    ///
+    /// assert_eq!(
+    ///     Term::pack(
+    ///         Term::Int(2),
+    ///         vec![Type::var(576), Type::var(30)],
+    ///         vec![Kind::fun(Mono, Mono), Mono],
+    ///         Type::fun(Type::var(0), Type::var(1))
+    ///     ),
+    ///     Term::Pack(
+    ///         Type::var(30),
+    ///         Box::new(Term::Pack(
+    ///             Type::var(576),
+    ///             Box::new(Term::Int(2)),
+    ///             Type::some(
+    ///                 vec![Kind::fun(Mono, Mono)],
+    ///                 Type::fun(Type::var(0), Type::var(31))
+    ///             )
+    ///         )),
+    ///         Type::some(vec![Kind::fun(Mono, Mono), Mono], Type::fun(Type::var(0), Type::var(1)))
+    ///     )
+    /// );
+    /// ```
+    pub fn pack<K>(t: Term, tys: Vec<Type>, ks: K, mut body: Type) -> Self
+    where
+        K: IntoIterator<Item = Kind>,
+    {
+        let ks: Vec<Kind> = ks.into_iter().collect();
+        let v: Vec<Type> = tys
+            .iter()
+            .enumerate()
+            .rev()
+            .map(|(i, ty)| {
+                let ret = body.clone();
+                body.subst_shift(i, &ty, isize::try_from(i).unwrap() + 1);
+                body.shift_above(i, -1);
+                ret
+            })
+            .enumerate()
+            .map(|(i, ty)| Type::some(Vec::from(&ks[..ks.len() - i]), ty))
+            .collect();
+        tys.into_iter()
+            .zip(v.into_iter().rev())
+            .fold(t, |t, (wit, ty)| Term::Pack(wit, Box::new(t), ty))
     }
 }
 
@@ -492,6 +623,105 @@ mod tests {
             1,
             Type::var(16),
             Type::some(vec![Mono, Mono], Type::var(18))
+        );
+    }
+
+    #[test]
+    fn pack() {
+        use Kind::*;
+
+        fn label(x: &str) -> Label {
+            Label::Label(Name(x.to_string()))
+        }
+
+        assert_eq!(
+            Term::pack(
+                Term::Int(1),
+                vec![
+                    Type::var(576),
+                    Type::var(0),
+                    Type::forall(vec![Mono], Type::var(0)),
+                    Type::var(30)
+                ],
+                vec![
+                    Kind::fun(Mono, Mono),
+                    Kind::fun(Mono, Kind::fun(Mono, Mono)),
+                    Kind::fun(Kind::fun(Mono, Mono), Mono),
+                    Mono
+                ],
+                Type::Record(Record::from_iter(vec![
+                    (label("a"), Type::var(3)),
+                    (label("b"), Type::var(2)),
+                    (label("c"), Type::var(0)),
+                    (label("d"), Type::var(1)),
+                    (label("e"), Type::var(4)),
+                ]))
+            ),
+            Term::Pack(
+                Type::var(30),
+                Box::new(Term::Pack(
+                    Type::forall(vec![Mono], Type::var(0)),
+                    Box::new(Term::Pack(
+                        Type::var(0),
+                        Box::new(Term::Pack(
+                            Type::var(576),
+                            Box::new(Term::Int(1)),
+                            Type::some(
+                                vec![Kind::fun(Mono, Mono)],
+                                Type::Record(Record::from_iter(vec![
+                                    (label("a"), Type::var(31)),
+                                    (label("b"), Type::forall(vec![Mono], Type::var(0))),
+                                    (label("c"), Type::var(0)),
+                                    (label("d"), Type::var(1)),
+                                    (label("e"), Type::var(1)),
+                                ],)),
+                            ),
+                        )),
+                        Type::some(
+                            vec![
+                                Kind::fun(Mono, Mono),
+                                Kind::fun(Mono, Kind::fun(Mono, Mono))
+                            ],
+                            Type::Record(Record::from_iter(vec![
+                                (label("a"), Type::var(32)),
+                                (label("b"), Type::forall(vec![Mono], Type::var(0))),
+                                (label("c"), Type::var(0)),
+                                (label("d"), Type::var(1)),
+                                (label("e"), Type::var(2)),
+                            ],)),
+                        ),
+                    )),
+                    Type::some(
+                        vec![
+                            Kind::fun(Mono, Mono),
+                            Kind::fun(Mono, Kind::fun(Mono, Mono)),
+                            Kind::fun(Kind::fun(Mono, Mono), Mono)
+                        ],
+                        Type::Record(Record::from_iter(vec![
+                            (label("a"), Type::var(33)),
+                            (label("b"), Type::var(2)),
+                            (label("c"), Type::var(0)),
+                            (label("d"), Type::var(1)),
+                            (label("e"), Type::var(3)),
+                        ],)),
+                    ),
+                )),
+                Type::some(
+                    vec![
+                        Kind::fun(Mono, Mono),
+                        Kind::fun(Mono, Kind::fun(Mono, Mono)),
+                        Kind::fun(Kind::fun(Mono, Mono), Mono),
+                        Mono
+                    ],
+                    Type::Record(Record::from_iter(vec![
+                        (label("a"), Type::var(3)),
+                        (label("b"), Type::var(2)),
+                        (label("c"), Type::var(0)),
+                        (label("d"), Type::var(1)),
+                        (label("e"), Type::var(4)),
+                    ],)),
+                ),
+            )
         );
     }
 }
