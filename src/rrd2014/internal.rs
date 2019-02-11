@@ -133,6 +133,10 @@ impl Type {
 }
 
 impl Term {
+    pub fn app(t1: Term, t2: Term) -> Self {
+        Term::App(Box::new(t1), Box::new(t2))
+    }
+
     /// Creates an n-ary polymorphic function.
     ///
     /// # Examples
@@ -199,5 +203,51 @@ impl Term {
         I: IntoIterator<Item = Type>,
     {
         tys.into_iter().fold(t, |t, ty| Term::Inst(Box::new(t), ty))
+    }
+
+    /// Creates an n-ary let-expression.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use modules::rrd2014::internal::*;
+    /// use Term::Int;
+    ///
+    /// assert_eq!(Term::let_in(None, Int(0)), Int(0));
+    ///
+    /// assert_eq!(
+    ///     Term::let_in(vec![(Int(12), Type::Int)], Int(0)),
+    ///     Term::app(Term::Abs(Type::Int, Box::new(Int(0))), Int(12))
+    /// );
+    ///
+    /// assert_eq!(
+    ///     Term::let_in(
+    ///         vec![(Int(12), Type::Int), (Int(36), Type::fun(Type::Int, Type::Int))],
+    ///         Int(0)
+    ///     ),
+    ///     Term::app(
+    ///         Term::app(
+    ///             Term::Abs(
+    ///                 Type::Int,
+    ///                 Box::new(Term::Abs(Type::fun(Type::Int, Type::Int), Box::new(Int(0))))
+    ///             ),
+    ///             Int(12)
+    ///         ),
+    ///         Int(36)
+    ///     )
+    /// );
+    /// ```
+    pub fn let_in<I>(bs: I, t: Term) -> Self
+    where
+        I: IntoIterator<Item = (Term, Type)>,
+        I::IntoIter: DoubleEndedIterator,
+    {
+        let mut t0 = t;
+        let mut v = vec![];
+        for (t, ty) in bs.into_iter().rev() {
+            t0 = Term::Abs(ty, Box::new(t0));
+            v.push(t);
+        }
+        v.into_iter().rfold(t0, Term::app)
     }
 }
