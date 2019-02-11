@@ -73,6 +73,9 @@ pub enum Term {
 pub struct Env<T> {
     tenv: Vec<Kind>,
     venv: Vec<Option<T>>,
+
+    /// A name-to-index map.
+    nmap: HashMap<Name, usize>,
 }
 
 impl<T> Default for Env<T> {
@@ -80,6 +83,7 @@ impl<T> Default for Env<T> {
         Env {
             tenv: vec![],
             venv: vec![],
+            nmap: HashMap::new(),
         }
     }
 }
@@ -128,6 +132,12 @@ impl<T: Shift> Shift for Vec<T> {
         self.iter_mut().for_each(|x| {
             x.shift_above(c, d);
         });
+    }
+}
+
+impl Name {
+    pub fn new(s: String) -> Self {
+        Name(s)
     }
 }
 
@@ -623,6 +633,9 @@ pub enum EnvError {
 
     #[fail(display = "unbound variable: {:?}", _0)]
     UnboundVariable(Variable),
+
+    #[fail(display = "unbound name: {:?}", _0)]
+    UnboundName(Name),
 }
 
 impl<T> Env<T> {
@@ -648,6 +661,22 @@ impl<T> Env<T> {
             .ok_or_else(|| EnvError::UnboundVariable(v))
     }
 
+    pub fn lookup_value_by_name(&self, name: &Name) -> Result<T, EnvError>
+    where
+        T: Clone,
+    {
+        let n = *self
+            .nmap
+            .get(&name)
+            .ok_or_else(|| EnvError::UnboundName(name.clone()))?;
+        Ok(self
+            .venv
+            .get(n)
+            .expect("lookup_value_by_name: unexpected None")
+            .clone()
+            .expect("lookup_value_by_name: unexpected None"))
+    }
+
     pub fn insert_type(&mut self, k: Kind)
     where
         T: Shift,
@@ -665,7 +694,8 @@ impl<T> Env<T> {
         ks.into_iter().for_each(|k| self.insert_type(k));
     }
 
-    pub fn insert_value(&mut self, x: T) {
+    pub fn insert_value(&mut self, name: Name, x: T) {
+        self.nmap.insert(name, self.venv.len());
         self.venv.push(Some(x));
     }
 
@@ -929,6 +959,7 @@ mod tests {
                 .into_iter()
                 .map(Some)
                 .collect(),
+            nmap: HashMap::new(),
         };
 
         assert_eq!(env.lookup_type(Variable(0)), Ok(Kind::fun(Mono, Mono)));
@@ -968,6 +999,7 @@ mod tests {
         let mut env = Env {
             tenv: vec![Mono],
             venv: vec![Type::var(0)].into_iter().map(Some).collect(),
+            nmap: HashMap::new(),
         };
         env.insert_type(Mono);
         assert_eq!(
@@ -975,6 +1007,7 @@ mod tests {
             Env {
                 tenv: vec![Mono, Mono],
                 venv: vec![Type::var(1)].into_iter().map(Some).collect(),
+                nmap: HashMap::new(),
             }
         );
     }

@@ -211,7 +211,7 @@ mod tests {
         assert_eq!(env.lookup_type(Variable::new(0)), Ok(Kind::fun(Mono, Mono)));
         assert_eq!(env.lookup_type(Variable::new(1)), Ok(Mono));
 
-        env.insert_value(AtomicTerm(Type::Int));
+        env.insert_value(Name::new("x".to_string()), AtomicTerm(Type::Int));
         assert_eq!(
             env.lookup_value(Variable::new(0)),
             Ok(AtomicTerm(Type::Int))
