@@ -359,6 +359,12 @@ impl From<Name> for Label {
     }
 }
 
+impl<'a> From<&'a str> for Label {
+    fn from(s: &str) -> Self {
+        Label::Label(Name::from(s))
+    }
+}
+
 impl<'a> From<&'a str> for Name {
     fn from(s: &str) -> Self {
         Name(s.to_string())

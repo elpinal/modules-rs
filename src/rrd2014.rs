@@ -494,4 +494,41 @@ mod tests {
             )
         );
     }
+
+    #[test]
+    fn elaborate_binding() {
+        use Binding::*;
+        use SemanticSig::*;
+
+        assert_elaborate_ok!(
+            Val(Ident::from("x"), Expr::Int(23)),
+            (
+                ITerm::Record(Record::from_iter(vec![(
+                    Label::from("x"),
+                    ITerm::Record(Record::from_iter(vec![(Label::Val, ITerm::Int(23))]))
+                )])),
+                Existential::from(HashMap::from_iter(vec![(
+                    Label::from("x"),
+                    AtomicTerm(IType::Int)
+                )]))
+            )
+        );
+
+        assert_elaborate_ok!(
+            Val(Ident::from("x"), Expr::abs(Ident::from("y"), Expr::Int(22))),
+            (
+                ITerm::Record(Record::from_iter(vec![(
+                    Label::from("x"),
+                    ITerm::Record(Record::from_iter(vec![(
+                        Label::Val,
+                        ITerm::abs(IType::var(0), ITerm::Int(22))
+                    )]))
+                )])),
+                Existential::from(HashMap::from_iter(vec![(
+                    Label::from("x"),
+                    AtomicTerm(IType::fun(IType::var(0), IType::Int))
+                )]))
+            )
+        );
+    }
 }
