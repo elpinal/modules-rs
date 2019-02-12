@@ -21,16 +21,19 @@ use internal::{Subst, Substitution};
 #[derive(Clone, Debug, PartialEq)]
 struct Ident(Name);
 
+#[derive(Clone, Debug, PartialEq)]
 enum Kind {
     Mono,
 }
 
+#[derive(Clone, Debug, PartialEq)]
 enum Type {
     Fun(Box<Type>, Box<Type>),
     Path(Path),
     Int,
 }
 
+#[derive(Clone, Debug, PartialEq)]
 enum Expr {
     Abs(Ident, Box<Expr>),
     App(Box<Expr>, Box<Expr>),
@@ -38,8 +41,10 @@ enum Expr {
     Int(isize),
 }
 
+#[derive(Clone, Debug, PartialEq)]
 struct Path(Box<Module>);
 
+#[derive(Clone, Debug, PartialEq)]
 enum Module {
     Ident(Ident),
     Seq(Vec<Binding>),
@@ -49,6 +54,7 @@ enum Module {
     Seal(Ident, Sig),
 }
 
+#[derive(Clone, Debug, PartialEq)]
 enum Binding {
     Val(Ident, Expr),
     Type(Ident, Type),
@@ -57,6 +63,7 @@ enum Binding {
     Include(Module),
 }
 
+#[derive(Clone, Debug, PartialEq)]
 enum Sig {
     Path(Path),
     Seq(Vec<Decl>),
@@ -64,8 +71,10 @@ enum Sig {
     Where(Box<Sig>, Proj<Ident>, Type),
 }
 
+#[derive(Clone, Debug, PartialEq)]
 struct Proj<T>(T, Vec<T>);
 
+#[derive(Clone, Debug, PartialEq)]
 enum Decl {
     Val(Ident, Type),
     ManType(Ident, Type),
@@ -111,14 +120,8 @@ type Env = internal::Env<SemanticSig, Option<StemFrom>>;
 
 #[derive(Debug, Fail, PartialEq)]
 enum TypeError {
-    #[fail(display = "unification: {}", _0)]
-    Unification(internal::UnificationError),
-}
-
-impl From<internal::UnificationError> for TypeError {
-    fn from(e: internal::UnificationError) -> Self {
-        TypeError::Unification(e)
-    }
+    #[fail(display = "type-checking {:?}: unification: {}", _0, _1)]
+    Unification(Expr, internal::UnificationError),
 }
 
 impl From<Name> for Ident {
@@ -346,12 +349,14 @@ impl Expr {
                 Ok((ITerm::abs(ty0.clone(), t), IType::fun(ty0, ty), s))
             }
             App(e1, e2) => {
-                let (mut t1, mut ty1, s1) = e1.infer(env)?;
-                let (t2, ty2, s2) = e2.infer(env)?;
+                let (mut t1, mut ty1, s1) = e1.clone().infer(env)?;
+                let (t2, ty2, s2) = e2.clone().infer(env)?;
                 t1.apply(&s2);
                 ty1.apply(&s2);
                 let mut v = IType::Var(env.fresh_type_variable(Mono, None));
-                let s3 = env.unify(vec![(ty1, IType::fun(ty2, v.clone()))])?;
+                let s3 = env
+                    .unify(vec![(ty1, IType::fun(ty2, v.clone()))])
+                    .map_err(|e| TypeError::Unification(Expr::App(e1, e2), e))?;
                 t1.apply(&s3);
                 v.apply(&s3);
                 let s = s3.compose(s2).compose(s1);
@@ -434,10 +439,10 @@ mod tests {
 
         assert_elaborate_err!(
             Expr::app(Int(45), Int(98)),
-            TypeError::Unification(UnificationError::NotUnifiable(
-                IType::Int,
-                IType::fun(IType::Int, IType::var(0))
-            ))
+            TypeError::Unification(
+                Expr::app(Int(45), Int(98)),
+                UnificationError::NotUnifiable(IType::Int, IType::fun(IType::Int, IType::var(0)))
+            )
         );
     }
 }
