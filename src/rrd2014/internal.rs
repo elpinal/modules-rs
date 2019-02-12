@@ -1400,4 +1400,42 @@ mod tests {
             Ok(Type::fun(Int, Int))
         );
     }
+
+    macro_rules! assert_encoding {
+        ($s:expr, $l:expr, $x:expr) => {{
+            use self::Record as R;
+            assert_eq!(Type::from($s), Record(R::from_iter(vec![($l, $x)])));
+        }};
+    }
+
+    #[test]
+    fn encoding() {
+        use crate::rrd2014::SemanticSig::*;
+        use Kind::*;
+        use Type::*;
+
+        assert_encoding!(AtomicTerm(Int), Label::Val, Int);
+        assert_encoding!(AtomicTerm(Type::var(0)), Label::Val, Type::var(0));
+
+        assert_encoding!(
+            AtomicType(Int, Mono),
+            Label::Typ,
+            Type::forall(
+                vec![Kind::fun(Mono, Mono)],
+                Type::fun(Type::app(Type::var(0), Int), Type::app(Type::var(0), Int))
+            )
+        );
+
+        assert_encoding!(
+            AtomicType(Type::var(0), Mono),
+            Label::Typ,
+            Type::forall(
+                vec![Kind::fun(Mono, Mono)],
+                Type::fun(
+                    Type::app(Type::var(0), Type::var(1)),
+                    Type::app(Type::var(0), Type::var(1)),
+                )
+            )
+        );
+    }
 }
