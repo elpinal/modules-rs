@@ -383,6 +383,12 @@ impl From<super::Ident> for Name {
     }
 }
 
+impl<'a> From<&'a super::Ident> for &'a Name {
+    fn from(id: &'a super::Ident) -> Self {
+        &id.0
+    }
+}
+
 impl Name {
     pub fn new(s: String) -> Self {
         Name(s)
@@ -951,7 +957,7 @@ impl<T, S> Env<T, S> {
             .ok_or_else(|| EnvError::UnboundVariable(v))
     }
 
-    pub fn lookup_value_by_name(&self, name: &Name) -> Result<T, EnvError>
+    pub fn lookup_value_by_name(&self, name: &Name) -> Result<(T, Variable), EnvError>
     where
         T: Clone,
     {
@@ -959,12 +965,14 @@ impl<T, S> Env<T, S> {
             .nmap
             .get(&name)
             .ok_or_else(|| EnvError::UnboundName(name.clone()))?;
-        Ok(self
-            .venv
-            .get(n)
-            .expect("lookup_value_by_name: unexpected None")
-            .clone()
-            .expect("lookup_value_by_name: unexpected None"))
+        Ok((
+            self.venv
+                .get(n)
+                .expect("lookup_value_by_name: unexpected None")
+                .clone()
+                .expect("lookup_value_by_name: unexpected None"),
+            Variable(self.venv.len() - n - 1),
+        ))
     }
 
     pub fn insert_type(&mut self, k: Kind, x: S)
@@ -1399,23 +1407,29 @@ mod tests {
         };
 
         env.insert_value(Name::from("x"), Int);
-        assert_eq!(env.lookup_value_by_name(&Name::from("x")), Ok(Int));
+        assert_eq!(
+            env.lookup_value_by_name(&Name::from("x")),
+            Ok((Int, Variable(0)))
+        );
 
         env.insert_value(Name::from("y"), Type::fun(Int, Int));
-        assert_eq!(env.lookup_value_by_name(&Name::from("x")), Ok(Int));
+        assert_eq!(
+            env.lookup_value_by_name(&Name::from("x")),
+            Ok((Int, Variable(1)))
+        );
         assert_eq!(
             env.lookup_value_by_name(&Name::from("y")),
-            Ok(Type::fun(Int, Int))
+            Ok((Type::fun(Int, Int), Variable(0)))
         );
 
         env.insert_value(Name::from("x"), Type::fun(Int, Type::var(0)));
         assert_eq!(
             env.lookup_value_by_name(&Name::from("x")),
-            Ok(Type::fun(Int, Type::var(0)))
+            Ok((Type::fun(Int, Type::var(0)), Variable(0)))
         );
         assert_eq!(
             env.lookup_value_by_name(&Name::from("y")),
-            Ok(Type::fun(Int, Int))
+            Ok((Type::fun(Int, Int), Variable(1)))
         );
     }
 

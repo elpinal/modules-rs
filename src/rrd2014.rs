@@ -12,6 +12,7 @@ use std::iter::FromIterator;
 
 use failure::Fail;
 
+use internal::EnvError;
 use internal::Kind as IKind;
 use internal::Record;
 use internal::Shift;
@@ -133,12 +134,21 @@ enum TypeError {
 
     #[fail(display = "defining type {:?}: {}", _0, _1)]
     TypeBinding(Ident, KindError),
+
+    #[fail(display = "environment error: {}", _0)]
+    Env(EnvError),
 }
 
 #[derive(Debug, Fail, PartialEq)]
 enum KindError {
     #[fail(display = "type {:?} is not well-kinded: {}", _0, _1)]
     IllKinded(Type, internal::NotMonoError),
+}
+
+impl From<EnvError> for TypeError {
+    fn from(e: EnvError) -> Self {
+        TypeError::Env(e)
+    }
 }
 
 impl From<Name> for Ident {
@@ -379,6 +389,22 @@ impl Elaboration for Binding {
                         AtomicType(ty, k),
                     )])),
                 ))
+            }
+            _ => unimplemented!(),
+        }
+    }
+}
+
+impl Elaboration for Module {
+    type Output = (ITerm, AbstractSig);
+    type Error = TypeError;
+
+    fn elaborate(&self, env: &mut Env) -> Result<Self::Output, Self::Error> {
+        use Module::*;
+        match *self {
+            Ident(ref id) => {
+                let (ssig, v) = env.lookup_value_by_name(id.into())?;
+                Ok((ITerm::Var(v), Existential::from(ssig)))
             }
             _ => unimplemented!(),
         }
