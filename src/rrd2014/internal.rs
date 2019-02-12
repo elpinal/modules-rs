@@ -259,6 +259,66 @@ impl<T: Substitution, S> Substitution for Env<T, S> {
     }
 }
 
+impl From<super::SemanticSig> for Type {
+    fn from(st: super::SemanticSig) -> Self {
+        use super::SemanticSig::*;
+        match st {
+            AtomicTerm(ty) => Type::Record(Record::from_iter(vec![(Label::Val, ty)])),
+            AtomicType(mut ty, k) => {
+                ty.shift(1);
+                Type::Record(Record::from_iter(vec![(
+                    Label::Typ,
+                    Type::forall(
+                        vec![Kind::fun(k, Kind::Mono)],
+                        Type::fun(
+                            Type::app(Type::var(0), ty.clone()),
+                            Type::app(Type::var(0), ty),
+                        ),
+                    ),
+                )]))
+            }
+            AtomicSig(asig) => {
+                let ty = Type::from(asig);
+                Type::Record(Record::from_iter(vec![(
+                    Label::Sig,
+                    Type::fun(ty.clone(), ty),
+                )]))
+            }
+            _ => unimplemented!(),
+        }
+    }
+}
+
+impl<T: Into<Type>> From<super::Existential<T>> for Type {
+    fn from(ex: super::Existential<T>) -> Self {
+        Type::some(
+            ex.0.qs.into_iter().map(|p| p.0).collect::<Vec<_>>(),
+            ex.0.body.into(),
+        )
+    }
+}
+
+impl<T: Into<Type>> From<super::Universal<T>> for Type {
+    fn from(u: super::Universal<T>) -> Self {
+        Type::forall(
+            u.0.qs.into_iter().map(|p| p.0).collect::<Vec<_>>(),
+            u.0.body.into(),
+        )
+    }
+}
+
+impl From<super::Fun> for Type {
+    fn from(f: super::Fun) -> Self {
+        Type::fun(f.0.into(), f.1.into())
+    }
+}
+
+impl<T: Into<Type>> From<Box<T>> for Type {
+    fn from(x: Box<T>) -> Self {
+        (*x).into()
+    }
+}
+
 impl From<super::SemanticTerm> for Term {
     fn from(st: super::SemanticTerm) -> Self {
         use super::SemanticTerm as ST;
