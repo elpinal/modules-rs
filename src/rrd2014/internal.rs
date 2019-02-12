@@ -1,6 +1,7 @@
 //! The internal language.
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::iter::FromIterator;
 
@@ -423,6 +424,26 @@ impl Type {
         };
         self.map(&f, 0)
     }
+
+    fn ftv(&self) -> HashSet<Variable> {
+        use Type::*;
+        match *self {
+            Var(v) => HashSet::from_iter(vec![v]),
+            Fun(ref ty1, ref ty2) => {
+                let mut s = ty1.ftv();
+                s.extend(ty2.ftv());
+                s
+            }
+            Record(ref r) => r.0.values().flat_map(|ty| ty.ftv()).collect(),
+            App(ref ty1, ref ty2) => {
+                let mut s = ty1.ftv();
+                s.extend(ty2.ftv());
+                s
+            }
+            Int => HashSet::new(),
+            _ => unimplemented!(),
+        }
+    }
 }
 
 impl Term {
@@ -744,6 +765,9 @@ pub enum EnvError {
 pub enum UnificationError {
     #[fail(display = "could not unify: {:?} and {:?}", _0, _1)]
     NotUnifiable(Type, Type),
+
+    #[fail(display = "recursive type is not allowed: {:?} and {:?}", _0, _1)]
+    Recursion(Variable, Type),
 }
 
 impl<T, S> Env<T, S> {
@@ -836,7 +860,10 @@ impl<T, S> Env<T, S> {
                 }
                 match (ty1, ty2) {
                     (Var(v), ty) | (ty, Var(v)) => {
-                        // TODO: occur check.
+                        let tvs = ty.ftv();
+                        if tvs.contains(&v) {
+                            return Err(UnificationError::Recursion(v, ty));
+                        }
                         let new_s = Subst::from_iter(vec![(v, ty)]);
                         self.apply(&new_s);
                         w.apply(&new_s);
