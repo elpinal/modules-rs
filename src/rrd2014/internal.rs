@@ -79,10 +79,10 @@ pub struct Env<T, S> {
     nmap: HashMap<Name, usize>,
 }
 
-#[derive(Default)]
-struct Subst(HashMap<Variable, Type>);
+#[derive(Clone, Default)]
+pub struct Subst(HashMap<Variable, Type>);
 
-trait Substitution {
+pub trait Substitution {
     fn apply(&mut self, s: &Subst);
 }
 
@@ -229,6 +229,12 @@ impl<'a> From<&'a str> for Name {
 impl From<String> for Name {
     fn from(s: String) -> Self {
         Name(s)
+    }
+}
+
+impl From<super::Ident> for Name {
+    fn from(id: super::Ident) -> Self {
+        id.0
     }
 }
 
@@ -829,16 +835,27 @@ impl<T, S> Env<T, S> {
         ks.into_iter().for_each(|(k, x)| self.insert_type(k, x));
     }
 
-    pub fn insert_value(&mut self, name: Name, x: T) {
+    pub fn insert_value(&mut self, name: Name, x: T) -> Option<Variable> {
+        let v = self.nmap.get(&name).map(|&n| Variable(n));
         self.nmap.insert(name, self.venv.len());
         self.venv.push(Some(x));
+        v
     }
 
     pub fn insert_dummy_value(&mut self) {
         self.venv.push(None);
     }
 
-    fn unify<I>(&mut self, iter: I) -> Result<Subst, UnificationError>
+    pub fn drop_value(&mut self, name: Name, prev: Option<Variable>) {
+        self.venv.pop();
+        if let Some(v) = prev {
+            self.nmap.insert(name, v.0);
+        } else {
+            self.nmap.remove(&name);
+        }
+    }
+
+    pub fn unify<I>(&mut self, iter: I) -> Result<Subst, UnificationError>
     where
         I: IntoIterator<Item = (Type, Type)>,
         T: Substitution,
@@ -879,13 +896,31 @@ impl<T, S> Env<T, S> {
             }
         }
     }
+
+    pub fn fresh_type_variable(&mut self, k: Kind, x: S) -> Variable
+    where
+        T: Shift,
+    {
+        let l = self.tenv.len();
+        self.insert_type(k, x);
+        Variable(l)
+    }
 }
 
 impl Subst {
-    fn compose(mut self, mut s: Subst) -> Self {
+    pub fn compose(mut self, mut s: Subst) -> Self {
         s.apply(&self);
         self.0.extend(s.0);
         self
+    }
+
+    pub fn shift(self, d: isize) -> Self {
+        let f = |p: (Variable, Type)| {
+            let (v, mut ty) = p;
+            ty.shift(d);
+            (v.add(d), ty)
+        };
+        Subst(self.0.into_iter().map(f).collect())
     }
 }
 
