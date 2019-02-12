@@ -132,6 +132,12 @@ enum TypeError {
     Unification(Expr, internal::UnificationError),
 }
 
+#[derive(Debug, Fail, PartialEq)]
+enum KindError {
+    #[fail(display = "type {:?} is not well-kinded: {}", _0, _1)]
+    IllKinded(Type, internal::NotMonoError),
+}
+
 impl From<Name> for Ident {
     fn from(name: Name) -> Self {
         Ident(name)
@@ -305,18 +311,20 @@ impl Elaboration for Kind {
 
 impl Elaboration for Type {
     type Output = (IType, IKind);
-    type Error = internal::NotMonoError;
+    type Error = KindError;
 
     fn elaborate(&self, env: &mut Env) -> Result<Self::Output, Self::Error> {
         use Type::*;
         match *self {
             Int => Ok((IType::Int, IKind::Mono)),
             Fun(ref ty1, ref ty2) => {
-                let (ty1, k1) = ty1.elaborate(env)?;
-                k1.mono()?;
-                let (ty2, k2) = ty2.elaborate(env)?;
-                k2.mono()?;
-                Ok((IType::fun(ty1, ty2), IKind::Mono))
+                let (ty11, k1) = ty1.elaborate(env)?;
+                k1.mono()
+                    .map_err(|e| KindError::IllKinded(*ty1.clone(), e))?;
+                let (ty21, k2) = ty2.elaborate(env)?;
+                k2.mono()
+                    .map_err(|e| KindError::IllKinded(*ty2.clone(), e))?;
+                Ok((IType::fun(ty11, ty21), IKind::Mono))
             }
             _ => unimplemented!(),
         }
