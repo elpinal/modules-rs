@@ -127,6 +127,24 @@ impl From<internal::UnificationError> for TypeError {
     }
 }
 
+impl From<Name> for Ident {
+    fn from(name: Name) -> Self {
+        Ident(name)
+    }
+}
+
+impl<'a> From<&'a str> for Ident {
+    fn from(s: &str) -> Self {
+        Ident::from(Name::from(s))
+    }
+}
+
+impl From<String> for Ident {
+    fn from(s: String) -> Self {
+        Ident::from(Name::from(s))
+    }
+}
+
 impl<T: Substitution> Substitution for Quantified<T> {
     fn apply(&mut self, s: &Subst) {
         let n = self.qs.len();
@@ -311,6 +329,14 @@ impl Elaboration for Expr {
 }
 
 impl Expr {
+    fn abs(id: Ident, e: Expr) -> Self {
+        Expr::Abs(id, Box::new(e))
+    }
+
+    fn app(e1: Expr, e2: Expr) -> Self {
+        Expr::App(Box::new(e1), Box::new(e2))
+    }
+
     fn infer(self, env: &mut Env) -> Result<(ITerm, IType, Subst), TypeError> {
         use Expr::*;
         use IKind::*;
@@ -326,11 +352,13 @@ impl Expr {
                 Ok((ITerm::abs(ty0.clone(), t), IType::fun(ty0, ty), s))
             }
             App(e1, e2) => {
-                let (t1, mut ty1, s1) = e1.infer(env)?;
+                let (mut t1, mut ty1, s1) = e1.infer(env)?;
                 let (t2, ty2, s2) = e2.infer(env)?;
+                t1.apply(&s2);
                 ty1.apply(&s2);
                 let mut v = IType::Var(env.fresh_type_variable(Mono, None));
                 let s3 = env.unify(vec![(ty1, IType::fun(ty2, v.clone()))])?;
+                t1.apply(&s3);
                 v.apply(&s3);
                 let s = s3.compose(s2).compose(s1);
                 Ok((ITerm::app(t1, t2), v, s))
@@ -370,6 +398,36 @@ mod tests {
         assert_eq!(
             env.lookup_value(Variable::new(0)),
             Ok(AtomicTerm(Type::Int))
+        );
+    }
+
+    macro_rules! assert_elaborate_ok {
+        ($x:expr, $r:expr) => {{
+            let mut env = Env::default();
+            assert_eq!($x.elaborate(&mut env), Ok($r));
+        }};
+    }
+
+    #[test]
+    fn elaborate_expr() {
+        use Expr::*;
+
+        assert_elaborate_ok!(Int(55), (ITerm::Int(55), IType::Int));
+
+        assert_elaborate_ok!(
+            Expr::abs(Ident::from("x"), Int(55)),
+            (
+                ITerm::abs(IType::var(0), ITerm::Int(55)),
+                IType::fun(IType::var(0), IType::Int)
+            )
+        );
+
+        assert_elaborate_ok!(
+            Expr::app(Expr::abs(Ident::from("x"), Int(55)), Int(98)),
+            (
+                ITerm::app(ITerm::abs(IType::Int, ITerm::Int(55)), ITerm::Int(98)),
+                IType::Int
+            )
         );
     }
 }

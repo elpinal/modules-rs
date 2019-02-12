@@ -207,6 +207,42 @@ impl Substitution for Type {
     }
 }
 
+impl Substitution for Term {
+    fn apply(&mut self, s: &Subst) {
+        use Term::*;
+        match *self {
+            Var(_) | Int(_) => (),
+            Abs(ref mut ty, ref mut t) => {
+                ty.apply(s);
+                t.apply(s);
+            }
+            App(ref mut t1, ref mut t2) => {
+                t1.apply(s);
+                t2.apply(s);
+            }
+            Record(ref mut r) => r.apply(s),
+            Proj(ref mut t, _) => t.apply(s),
+            Poly(ref mut k, ref mut t) => {
+                k.apply(s);
+                t.apply(s); // The possibility of variable capture.
+            }
+            Inst(ref mut t, ref mut ty) => {
+                t.apply(s);
+                ty.apply(s);
+            }
+            Pack(ref mut ty1, ref mut t, ref mut ty2) => {
+                ty1.apply(s);
+                t.apply(s);
+                ty2.apply(s);
+            }
+            Unpack(ref mut t1, ref mut t2) => {
+                t1.apply(s);
+                t2.apply(s); // The possibility of variable capture.
+            }
+        }
+    }
+}
+
 impl Substitution for Subst {
     fn apply(&mut self, s: &Subst) {
         self.0.values_mut().for_each(|ty| ty.apply(s));
