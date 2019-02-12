@@ -70,15 +70,15 @@ pub enum Term {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct Env<T> {
-    tenv: Vec<Kind>,
+pub struct Env<T, S> {
+    tenv: Vec<(Kind, S)>,
     venv: Vec<Option<T>>,
 
     /// A name-to-index map.
     nmap: HashMap<Name, usize>,
 }
 
-impl<T> Default for Env<T> {
+impl<T, S> Default for Env<T, S> {
     fn default() -> Self {
         Env {
             tenv: vec![],
@@ -650,8 +650,11 @@ pub enum EnvError {
     UnboundName(Name),
 }
 
-impl<T> Env<T> {
-    pub fn lookup_type(&self, v: Variable) -> Result<Kind, EnvError> {
+impl<T, S> Env<T, S> {
+    pub fn lookup_type(&self, v: Variable) -> Result<(Kind, S), EnvError>
+    where
+        S: Clone,
+    {
         self.tenv
             .iter()
             .rev()
@@ -689,21 +692,21 @@ impl<T> Env<T> {
             .expect("lookup_value_by_name: unexpected None"))
     }
 
-    pub fn insert_type(&mut self, k: Kind)
+    pub fn insert_type(&mut self, k: Kind, x: S)
     where
         T: Shift,
     {
-        self.tenv.push(k);
-        self.tenv.iter_mut().for_each(|k| k.shift(1));
+        self.tenv.push((k, x));
+        self.tenv.iter_mut().for_each(|k| k.0.shift(1));
         self.venv.iter_mut().for_each(|x| x.shift(1));
     }
 
     pub fn insert_types<I>(&mut self, ks: I)
     where
         T: Shift,
-        I: IntoIterator<Item = Kind>,
+        I: IntoIterator<Item = (Kind, S)>,
     {
-        ks.into_iter().for_each(|k| self.insert_type(k));
+        ks.into_iter().for_each(|(k, x)| self.insert_type(k, x));
     }
 
     pub fn insert_value(&mut self, name: Name, x: T) {
@@ -966,7 +969,7 @@ mod tests {
         use Kind::*;
 
         let env = Env {
-            tenv: vec![Mono, Kind::fun(Mono, Mono)],
+            tenv: vec![(Mono, "M.t"), (Kind::fun(Mono, Mono), "M.s")],
             venv: vec![Type::var(3), Type::var(6)]
                 .into_iter()
                 .map(Some)
@@ -974,21 +977,27 @@ mod tests {
             nmap: HashMap::new(),
         };
 
-        assert_eq!(env.lookup_type(Variable(0)), Ok(Kind::fun(Mono, Mono)));
-        assert_eq!(env.lookup_type(Variable(1)), Ok(Mono));
+        assert_eq!(
+            env.lookup_type(Variable(0)),
+            Ok((Kind::fun(Mono, Mono), "M.s"))
+        );
+        assert_eq!(env.lookup_type(Variable(1)), Ok((Mono, "M.t")));
 
         assert_eq!(env.lookup_value(Variable(0)), Ok(Type::var(6)));
         assert_eq!(env.lookup_value(Variable(1)), Ok(Type::var(3)));
 
         let mut env = env;
-        env.insert_type(Kind::fun(Mono, Kind::fun(Mono, Mono)));
+        env.insert_type(Kind::fun(Mono, Kind::fun(Mono, Mono)), "M.u");
 
         assert_eq!(
             env.lookup_type(Variable(0)),
-            Ok(Kind::fun(Mono, Kind::fun(Mono, Mono)))
+            Ok((Kind::fun(Mono, Kind::fun(Mono, Mono)), "M.u"))
         );
-        assert_eq!(env.lookup_type(Variable(1)), Ok(Kind::fun(Mono, Mono)));
-        assert_eq!(env.lookup_type(Variable(2)), Ok(Mono));
+        assert_eq!(
+            env.lookup_type(Variable(1)),
+            Ok((Kind::fun(Mono, Mono), "M.s"))
+        );
+        assert_eq!(env.lookup_type(Variable(2)), Ok((Mono, "M.t")));
 
         assert_eq!(
             env.lookup_type(Variable(3)),
@@ -1009,15 +1018,15 @@ mod tests {
         use Kind::*;
 
         let mut env = Env {
-            tenv: vec![Mono],
+            tenv: vec![(Mono, "N.t")],
             venv: vec![Type::var(0)].into_iter().map(Some).collect(),
             nmap: HashMap::new(),
         };
-        env.insert_type(Mono);
+        env.insert_type(Mono, "P.t");
         assert_eq!(
             env,
             Env {
-                tenv: vec![Mono, Mono],
+                tenv: vec![(Mono, "N.t"), (Mono, "P.t")],
                 venv: vec![Type::var(1)].into_iter().map(Some).collect(),
                 nmap: HashMap::new(),
             }
@@ -1030,7 +1039,7 @@ mod tests {
         use Type::*;
 
         let mut env = Env {
-            tenv: vec![Mono],
+            tenv: vec![(Mono, "t")],
             venv: vec![],
             nmap: HashMap::new(),
         };

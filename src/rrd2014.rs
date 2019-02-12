@@ -16,6 +16,7 @@ use internal::Term as ITerm;
 use internal::Type as IType;
 use internal::{Label, Name};
 
+#[derive(Clone, Debug, PartialEq)]
 struct Ident(Name);
 
 enum Kind {
@@ -73,8 +74,14 @@ enum Decl {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+struct StemFrom {
+    id: Ident,
+    prefix: Vec<Ident>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 struct Quantified<T> {
-    qs: Vec<IKind>,
+    qs: Vec<(IKind, StemFrom)>,
     body: T,
 }
 
@@ -98,7 +105,7 @@ enum SemanticSig {
     FunctorSig(Universal<Box<Fun>>),
 }
 
-type Env = internal::Env<SemanticSig>;
+type Env = internal::Env<SemanticSig, StemFrom>;
 
 #[derive(Debug, Fail, PartialEq)]
 enum TypeError {
@@ -124,6 +131,12 @@ impl<T: Shift> Shift for Existential<T> {
 }
 
 impl<T: Shift> Shift for Universal<T> {
+    fn shift_above(&mut self, c: usize, d: isize) {
+        self.0.shift_above(c, d);
+    }
+}
+
+impl<T: Shift> Shift for (T, StemFrom) {
     fn shift_above(&mut self, c: usize, d: isize) {
         self.0.shift_above(c, d);
     }
@@ -265,11 +278,14 @@ mod tests {
         use internal::*;
         use SemanticSig::*;
 
-        let mut env: Env<SemanticSig> = Env::default();
+        let mut env: Env<SemanticSig, _> = Env::default();
 
-        env.insert_types(vec![Mono, Kind::fun(Mono, Mono)]);
-        assert_eq!(env.lookup_type(Variable::new(0)), Ok(Kind::fun(Mono, Mono)));
-        assert_eq!(env.lookup_type(Variable::new(1)), Ok(Mono));
+        env.insert_types(vec![(Mono, "s"), (Kind::fun(Mono, Mono), "M.t")]);
+        assert_eq!(
+            env.lookup_type(Variable::new(0)),
+            Ok((Kind::fun(Mono, Mono), "M.t"))
+        );
+        assert_eq!(env.lookup_type(Variable::new(1)), Ok((Mono, "s")));
 
         env.insert_value(Name::new("x".to_string()), AtomicTerm(Type::Int));
         assert_eq!(
