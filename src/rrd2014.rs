@@ -380,6 +380,12 @@ impl Type {
     }
 }
 
+impl SemanticSig {
+    fn atomic_sig(qs: Vec<(IKind, StemFrom)>, body: SemanticSig) -> Self {
+        SemanticSig::AtomicSig(Box::new(Existential(Quantified { qs, body })))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
