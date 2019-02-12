@@ -13,6 +13,9 @@ pub struct Name(String);
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Label {
     Label(Name),
+    Val,
+    Typ,
+    Sig,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -256,6 +259,26 @@ impl<T: Substitution, S> Substitution for Env<T, S> {
     }
 }
 
+impl From<super::SemanticTerm> for Term {
+    fn from(st: super::SemanticTerm) -> Self {
+        use super::SemanticTerm as ST;
+        match st {
+            ST::Term(t) => Term::Record(Record::from_iter(vec![(Label::Val, t)])),
+            ST::Type(mut ty, k) => {
+                ty.shift(1);
+                Term::Record(Record::from_iter(vec![(
+                    Label::Typ,
+                    Term::poly(
+                        vec![Kind::fun(k, Kind::Mono)],
+                        Term::abs(Type::app(Type::var(0), ty), Term::var(0)),
+                    ),
+                )]))
+            }
+            _ => unimplemented!(),
+        }
+    }
+}
+
 impl<'a> From<&'a str> for Name {
     fn from(s: &str) -> Self {
         Name(s.to_string())
@@ -337,6 +360,10 @@ impl Type {
 
     pub fn fun(ty1: Type, ty2: Type) -> Self {
         Type::Fun(Box::new(ty1), Box::new(ty2))
+    }
+
+    pub fn app(ty1: Type, ty2: Type) -> Self {
+        Type::App(Box::new(ty1), Box::new(ty2))
     }
 
     /// Creates an n-ary existential type.

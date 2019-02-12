@@ -116,6 +116,12 @@ enum SemanticSig {
     FunctorSig(Universal<Box<Fun>>),
 }
 
+enum SemanticTerm {
+    Term(ITerm),
+    Type(IType, IKind),
+    Sig(AbstractSig),
+}
+
 type Env = internal::Env<SemanticSig, Option<StemFrom>>;
 
 #[derive(Debug, Fail, PartialEq)]
