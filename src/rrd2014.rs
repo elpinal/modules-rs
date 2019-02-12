@@ -472,6 +472,18 @@ mod tests {
     }
 
     #[test]
+    fn elaborate_type() {
+        use IKind::*;
+        use Type::*;
+
+        assert_elaborate_ok!(Int, (IType::Int, Mono));
+        assert_elaborate_ok!(
+            Type::fun(Int, Int),
+            (IType::fun(IType::Int, IType::Int), Mono)
+        );
+    }
+
+    #[test]
     fn elaborate_expr() {
         use internal::UnificationError;
         use Expr::*;
