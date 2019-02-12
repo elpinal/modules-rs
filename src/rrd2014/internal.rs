@@ -14,7 +14,7 @@ pub enum Label {
     Label(Name),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Variable(usize);
 
 #[derive(Clone, Debug, PartialEq)]
@@ -78,6 +78,13 @@ pub struct Env<T, S> {
     nmap: HashMap<Name, usize>,
 }
 
+#[derive(Default)]
+struct Subst(HashMap<Variable, Type>);
+
+trait Substitution {
+    fn apply(&mut self, s: &Subst);
+}
+
 impl<T, S> Default for Env<T, S> {
     fn default() -> Self {
         Env {
@@ -135,6 +142,83 @@ impl<T: Shift> Shift for Vec<T> {
     }
 }
 
+impl<T: Substitution> Substitution for Option<T> {
+    fn apply(&mut self, s: &Subst) {
+        self.iter_mut().for_each(|x| x.apply(s));
+    }
+}
+
+impl<T: Substitution> Substitution for Vec<T> {
+    fn apply(&mut self, s: &Subst) {
+        self.iter_mut().for_each(|x| x.apply(s));
+    }
+}
+
+impl<T: Substitution> Substitution for (T, T) {
+    fn apply(&mut self, s: &Subst) {
+        self.0.apply(s);
+        self.1.apply(s);
+    }
+}
+
+impl<T: Substitution> Substitution for Record<T> {
+    fn apply(&mut self, s: &Subst) {
+        self.0.values_mut().for_each(|x| x.apply(s));
+    }
+}
+
+impl Substitution for Kind {
+    fn apply(&mut self, _: &Subst) {}
+}
+
+impl Substitution for Type {
+    fn apply(&mut self, s: &Subst) {
+        use Type::*;
+        match *self {
+            Var(ref mut v) => {
+                if let Option::Some(ty) = s.0.get(v) {
+                    *self = ty.clone();
+                }
+            }
+            Fun(ref mut ty1, ref mut ty2) => {
+                ty1.apply(s);
+                ty2.apply(s);
+            }
+            Record(ref mut r) => r.apply(s),
+            Forall(ref mut k, ref mut ty) => {
+                k.apply(s);
+                ty.apply(s); // The possibility of variable capture.
+            }
+            Some(ref mut k, ref mut ty) => {
+                k.apply(s);
+                ty.apply(s); // The possibility of variable capture.
+            }
+            Abs(ref mut k, ref mut ty) => {
+                k.apply(s);
+                ty.apply(s); // The possibility of variable capture.
+            }
+            App(ref mut ty1, ref mut ty2) => {
+                ty1.apply(s);
+                ty2.apply(s);
+            }
+            Int => (),
+        }
+    }
+}
+
+impl Substitution for Subst {
+    fn apply(&mut self, s: &Subst) {
+        self.0.values_mut().for_each(|ty| ty.apply(s));
+    }
+}
+
+impl<T: Substitution, S> Substitution for Env<T, S> {
+    fn apply(&mut self, s: &Subst) {
+        self.tenv.iter_mut().for_each(|p| p.0.apply(s));
+        self.venv.iter_mut().for_each(|x| x.apply(s));
+    }
+}
+
 impl<'a> From<&'a str> for Name {
     fn from(s: &str) -> Self {
         Name(s.to_string())
@@ -160,6 +244,12 @@ impl Variable {
 
     fn add(self, d: isize) -> Self {
         Variable(usize::try_from(isize::try_from(self.0).unwrap() + d).expect("negative index"))
+    }
+}
+
+impl FromIterator<(Variable, Type)> for Subst {
+    fn from_iter<I: IntoIterator<Item = (Variable, Type)>>(iter: I) -> Self {
+        Subst(HashMap::from_iter(iter))
     }
 }
 
@@ -650,6 +740,12 @@ pub enum EnvError {
     UnboundName(Name),
 }
 
+#[derive(Debug, Fail, PartialEq)]
+pub enum UnificationError {
+    #[fail(display = "could not unify: {:?} and {:?}", _0, _1)]
+    NotUnifiable(Type, Type),
+}
+
 impl<T, S> Env<T, S> {
     pub fn lookup_type(&self, v: Variable) -> Result<(Kind, S), EnvError>
     where
@@ -716,6 +812,53 @@ impl<T, S> Env<T, S> {
 
     pub fn insert_dummy_value(&mut self) {
         self.venv.push(None);
+    }
+
+    fn unify<I>(&mut self, iter: I) -> Result<Subst, UnificationError>
+    where
+        I: IntoIterator<Item = (Type, Type)>,
+        T: Substitution,
+    {
+        self.unify_aux(iter, Subst::default())
+    }
+
+    fn unify_aux<I>(&mut self, iter: I, mut s: Subst) -> Result<Subst, UnificationError>
+    where
+        I: IntoIterator<Item = (Type, Type)>,
+        T: Substitution,
+    {
+        use Type::*;
+        let mut w: Vec<(Type, Type)> = iter.into_iter().collect();
+        loop {
+            if let Option::Some((ty1, ty2)) = w.pop() {
+                if ty1 == ty2 {
+                    continue;
+                }
+                match (ty1, ty2) {
+                    (Var(v), ty) | (ty, Var(v)) => {
+                        // TODO: occur check.
+                        let new_s = Subst::from_iter(vec![(v, ty)]);
+                        self.apply(&new_s);
+                        w.apply(&new_s);
+                        s = s.compose(new_s);
+                    }
+                    (Fun(ty11, ty12), Fun(ty21, ty22)) => {
+                        w.extend(vec![(*ty11, *ty21), (*ty12, *ty22)]);
+                    }
+                    (ty1, ty2) => Err(UnificationError::NotUnifiable(ty1, ty2))?,
+                }
+            } else {
+                return Ok(s);
+            }
+        }
+    }
+}
+
+impl Subst {
+    fn compose(mut self, mut s: Subst) -> Self {
+        s.apply(&self);
+        self.0.extend(s.0);
+        self
     }
 }
 
