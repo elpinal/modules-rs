@@ -111,12 +111,6 @@ type Env = internal::Env<SemanticSig, Option<StemFrom>>;
 
 #[derive(Debug, Fail, PartialEq)]
 enum TypeError {
-    #[fail(display = "not function type: {:?}", _0)]
-    NotFunction(IType),
-
-    #[fail(display = "type mismatch: {:?} and {:?}", _0, _1)]
-    TypeMismatch(IType, IType),
-
     #[fail(display = "unification: {}", _0)]
     Unification(internal::UnificationError),
 }
@@ -408,8 +402,16 @@ mod tests {
         }};
     }
 
+    macro_rules! assert_elaborate_err {
+        ($x:expr, $r:expr) => {{
+            let mut env = Env::default();
+            assert_eq!($x.elaborate(&mut env), Err($r));
+        }};
+    }
+
     #[test]
     fn elaborate_expr() {
+        use internal::UnificationError;
         use Expr::*;
 
         assert_elaborate_ok!(Int(55), (ITerm::Int(55), IType::Int));
@@ -428,6 +430,14 @@ mod tests {
                 ITerm::app(ITerm::abs(IType::Int, ITerm::Int(55)), ITerm::Int(98)),
                 IType::Int
             )
+        );
+
+        assert_elaborate_err!(
+            Expr::app(Int(45), Int(98)),
+            TypeError::Unification(UnificationError::NotUnifiable(
+                IType::Int,
+                IType::fun(IType::Int, IType::var(0))
+            ))
         );
     }
 }
