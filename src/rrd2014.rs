@@ -130,6 +130,9 @@ type Env = internal::Env<SemanticSig, Option<StemFrom>>;
 enum TypeError {
     #[fail(display = "type-checking {:?}: unification: {}", _0, _1)]
     Unification(Expr, internal::UnificationError),
+
+    #[fail(display = "defining type {:?}: {}", _0, _1)]
+    TypeBinding(Ident, KindError),
 }
 
 #[derive(Debug, Fail, PartialEq)]
@@ -362,6 +365,21 @@ impl Elaboration for Binding {
                     )])),
                 ))
             }
+            Type(ref id, ref ty) => {
+                let (ty, k) = ty
+                    .elaborate(env)
+                    .map_err(|e| TypeError::TypeBinding(id.clone(), e))?;
+                Ok((
+                    ITerm::Record(Record::from_iter(vec![(
+                        Label::from(id.clone()),
+                        SemanticTerm::Type(ty.clone(), k.clone()).into(),
+                    )])),
+                    Existential::from(HashMap::from_iter(vec![(
+                        Label::from(id.clone()),
+                        AtomicType(ty, k),
+                    )])),
+                ))
+            }
             _ => unimplemented!(),
         }
     }
@@ -517,6 +535,7 @@ mod tests {
 
     #[test]
     fn elaborate_binding() {
+        use super::Type as T;
         use Binding::*;
         use SemanticSig::*;
 
@@ -547,6 +566,49 @@ mod tests {
                 Existential::from(HashMap::from_iter(vec![(
                     Label::from("x"),
                     AtomicTerm(IType::fun(IType::var(0), IType::Int))
+                )]))
+            )
+        );
+
+        assert_elaborate_ok!(
+            Type(Ident::from("t"), T::Int),
+            (
+                ITerm::Record(Record::from_iter(vec![(
+                    Label::from("t"),
+                    ITerm::Record(Record::from_iter(vec![(
+                        Label::Typ,
+                        ITerm::poly(
+                            vec![IKind::fun(IKind::Mono, IKind::Mono)],
+                            ITerm::abs(IType::app(IType::var(0), IType::Int), ITerm::var(0))
+                        )
+                    )]))
+                )])),
+                Existential::from(HashMap::from_iter(vec![(
+                    Label::from("t"),
+                    AtomicType(IType::Int, IKind::Mono)
+                )]))
+            )
+        );
+
+        assert_elaborate_ok!(
+            Type(Ident::from("t"), T::fun(T::Int, T::Int)),
+            (
+                ITerm::Record(Record::from_iter(vec![(
+                    Label::from("t"),
+                    ITerm::Record(Record::from_iter(vec![(
+                        Label::Typ,
+                        ITerm::poly(
+                            vec![IKind::fun(IKind::Mono, IKind::Mono)],
+                            ITerm::abs(
+                                IType::app(IType::var(0), IType::fun(IType::Int, IType::Int)),
+                                ITerm::var(0)
+                            )
+                        )
+                    )]))
+                )])),
+                Existential::from(HashMap::from_iter(vec![(
+                    Label::from("t"),
+                    AtomicType(IType::fun(IType::Int, IType::Int), IKind::Mono)
                 )]))
             )
         );
