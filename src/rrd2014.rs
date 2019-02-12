@@ -245,7 +245,7 @@ trait Elaboration {
     type Output;
     type Error;
 
-    fn elaborate(self, env: &mut Env) -> Result<Self::Output, Self::Error>;
+    fn elaborate(&self, env: &mut Env) -> Result<Self::Output, Self::Error>;
 }
 
 #[derive(Debug, Fail, PartialEq)]
@@ -288,8 +288,8 @@ impl Elaboration for Kind {
     type Output = IKind;
     type Error = ();
 
-    fn elaborate(self, _: &mut Env) -> Result<Self::Output, Self::Error> {
-        match self {
+    fn elaborate(&self, _: &mut Env) -> Result<Self::Output, Self::Error> {
+        match *self {
             Kind::Mono => Ok(IKind::Mono),
         }
     }
@@ -299,11 +299,11 @@ impl Elaboration for Type {
     type Output = (IType, IKind);
     type Error = internal::NotMonoError;
 
-    fn elaborate(self, env: &mut Env) -> Result<Self::Output, Self::Error> {
+    fn elaborate(&self, env: &mut Env) -> Result<Self::Output, Self::Error> {
         use Type::*;
-        match self {
+        match *self {
             Int => Ok((IType::Int, IKind::Mono)),
-            Fun(ty1, ty2) => {
+            Fun(ref ty1, ref ty2) => {
                 let (ty1, k1) = ty1.elaborate(env)?;
                 k1.mono()?;
                 let (ty2, k2) = ty2.elaborate(env)?;
@@ -319,7 +319,7 @@ impl Elaboration for Expr {
     type Output = (ITerm, IType);
     type Error = TypeError;
 
-    fn elaborate(self, env: &mut Env) -> Result<Self::Output, Self::Error> {
+    fn elaborate(&self, env: &mut Env) -> Result<Self::Output, Self::Error> {
         let (t, ty, _) = self.infer(env)?;
         Ok((t, ty))
     }
