@@ -347,6 +347,18 @@ impl From<super::SemanticTerm> for Term {
     }
 }
 
+impl From<super::Ident> for Label {
+    fn from(id: super::Ident) -> Self {
+        Label::Label(Name::from(id))
+    }
+}
+
+impl From<Name> for Label {
+    fn from(name: Name) -> Self {
+        Label::Label(name)
+    }
+}
+
 impl<'a> From<&'a str> for Name {
     fn from(s: &str) -> Self {
         Name(s.to_string())

@@ -8,10 +8,12 @@ pub mod internal;
 
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::iter::FromIterator;
 
 use failure::Fail;
 
 use internal::Kind as IKind;
+use internal::Record;
 use internal::Shift;
 use internal::Term as ITerm;
 use internal::Type as IType;
@@ -328,6 +330,41 @@ impl Elaboration for Expr {
     fn elaborate(&self, env: &mut Env) -> Result<Self::Output, Self::Error> {
         let (t, ty, _) = self.infer(env)?;
         Ok((t, ty))
+    }
+}
+
+impl Elaboration for Binding {
+    type Output = (ITerm, Existential<HashMap<Label, SemanticSig>>);
+    type Error = TypeError;
+
+    fn elaborate(&self, env: &mut Env) -> Result<Self::Output, Self::Error> {
+        use Binding::*;
+        use SemanticSig::*;
+        match *self {
+            Val(ref id, ref e) => {
+                let (t, ty) = e.elaborate(env)?;
+                Ok((
+                    ITerm::Record(Record::from_iter(vec![(
+                        Label::from(id.clone()),
+                        SemanticTerm::Term(t).into(),
+                    )])),
+                    Existential::from(HashMap::from_iter(vec![(
+                        Label::from(id.clone()),
+                        AtomicTerm(ty),
+                    )])),
+                ))
+            }
+            _ => unimplemented!(),
+        }
+    }
+}
+
+impl<T> From<T> for Existential<T> {
+    fn from(x: T) -> Self {
+        Existential(Quantified {
+            qs: vec![],
+            body: x,
+        })
     }
 }
 
