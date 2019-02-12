@@ -334,29 +334,29 @@ impl Expr {
         Expr::App(Box::new(e1), Box::new(e2))
     }
 
-    fn infer(self, env: &mut Env) -> Result<(ITerm, IType, Subst), TypeError> {
+    fn infer(&self, env: &mut Env) -> Result<(ITerm, IType, Subst), TypeError> {
         use Expr::*;
         use IKind::*;
-        match self {
-            Abs(id, e) => {
+        match *self {
+            Abs(ref id, ref e) => {
                 let v = env.fresh_type_variable(Mono, None);
                 let mut ty0 = IType::Var(v);
-                let name = Name::from(id);
+                let name = Name::from(id.clone());
                 let prev = env.insert_value(name.clone(), SemanticSig::AtomicTerm(ty0.clone()));
                 let (t, ty, s) = e.infer(env)?;
                 env.drop_value(name, prev);
                 ty0.apply(&s);
                 Ok((ITerm::abs(ty0.clone(), t), IType::fun(ty0, ty), s))
             }
-            App(e1, e2) => {
-                let (mut t1, mut ty1, s1) = e1.clone().infer(env)?;
-                let (t2, ty2, s2) = e2.clone().infer(env)?;
+            App(ref e1, ref e2) => {
+                let (mut t1, mut ty1, s1) = e1.infer(env)?;
+                let (t2, ty2, s2) = e2.infer(env)?;
                 t1.apply(&s2);
                 ty1.apply(&s2);
                 let mut v = IType::Var(env.fresh_type_variable(Mono, None));
                 let s3 = env
                     .unify(vec![(ty1, IType::fun(ty2, v.clone()))])
-                    .map_err(|e| TypeError::Unification(Expr::App(e1, e2), e))?;
+                    .map_err(|e| TypeError::Unification(self.clone(), e))?;
                 t1.apply(&s3);
                 v.apply(&s3);
                 let s = s3.compose(s2).compose(s1);
