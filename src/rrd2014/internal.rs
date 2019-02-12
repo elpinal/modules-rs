@@ -284,7 +284,12 @@ impl From<super::SemanticSig> for Type {
                     Type::fun(ty.clone(), ty),
                 )]))
             }
-            _ => unimplemented!(),
+            StructureSig(m) => Type::Record(
+                m.into_iter()
+                    .map(|(l, ssig)| (l, Type::from(ssig)))
+                    .collect(),
+            ),
+            FunctorSig(u) => u.into(),
         }
     }
 }
@@ -334,7 +339,10 @@ impl From<super::SemanticTerm> for Term {
                     ),
                 )]))
             }
-            _ => unimplemented!(),
+            ST::Sig(asig) => Term::Record(Record::from_iter(vec![(
+                Label::Sig,
+                Term::abs(Type::from(asig), Term::var(0)),
+            )])),
         }
     }
 }
