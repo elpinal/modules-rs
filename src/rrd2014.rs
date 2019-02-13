@@ -302,6 +302,9 @@ enum AtomicError {
 
     #[fail(display = "not atomic type: {:?}", _0)]
     AtomicType(SemanticSig),
+
+    #[fail(display = "not atomic type: {:?}", _0)]
+    AtomicSig(SemanticSig),
 }
 
 impl SemanticSig {
@@ -326,6 +329,13 @@ impl SemanticSig {
         match self {
             SemanticSig::AtomicType(ty, k) => Ok((ty, k)),
             _ => Err(AtomicError::AtomicType(self)),
+        }
+    }
+
+    fn get_atomic_sig(self) -> Result<AbstractSig, AtomicError> {
+        match self {
+            SemanticSig::AtomicSig(asig) => Ok(*asig),
+            _ => Err(AtomicError::AtomicSig(self)),
         }
     }
 }
@@ -374,6 +384,31 @@ impl Elaboration for Expr {
     fn elaborate(&self, env: &mut Env) -> Result<Self::Output, Self::Error> {
         let (t, ty, _) = self.infer(env)?;
         Ok((t, ty))
+    }
+}
+
+impl Elaboration for Sig {
+    type Output = AbstractSig;
+    type Error = TypeError;
+
+    fn elaborate(&self, env: &mut Env) -> Result<Self::Output, Self::Error> {
+        use Sig::*;
+        match *self {
+            Path(ref p) => Ok(p.elaborate(env)?.1.get_atomic_sig()?),
+            Fun(ref id, ref domain, ref range) => {
+                let enter_state = env.get_state();
+                let asig1 = domain.elaborate(env)?;
+                env.insert_types(asig1.0.qs.clone().into_iter().map(|(k, s)| (k, Some(s))));
+                env.insert_value(Name::from(id.clone()), asig1.0.body.clone());
+                let asig2 = range.elaborate(env)?;
+                env.drop_types(asig1.0.qs.len());
+                env.drop_values_state(1, enter_state);
+                Ok(Existential::from(SemanticSig::FunctorSig(
+                    Universal::from(asig1).map(|ssig| Box::new(self::Fun(ssig, asig2))),
+                )))
+            }
+            _ => unimplemented!(),
+        }
     }
 }
 
@@ -538,10 +573,16 @@ impl<T> From<T> for Existential<T> {
     }
 }
 
+impl<T> From<Existential<T>> for Universal<T> {
+    fn from(ex: Existential<T>) -> Self {
+        Universal(ex.0)
+    }
+}
+
 impl<T> Quantified<T> {
     fn map<F, U>(self, f: F) -> Quantified<U>
     where
-        F: Fn(T) -> U,
+        F: FnOnce(T) -> U,
     {
         Quantified {
             qs: self.qs,
@@ -553,9 +594,18 @@ impl<T> Quantified<T> {
 impl<T> Existential<T> {
     fn map<F, U>(self, f: F) -> Existential<U>
     where
-        F: Fn(T) -> U,
+        F: FnOnce(T) -> U,
     {
         Existential(self.0.map(f))
+    }
+}
+
+impl<T> Universal<T> {
+    fn map<F, U>(self, f: F) -> Universal<U>
+    where
+        F: FnOnce(T) -> U,
+    {
+        Universal(self.0.map(f))
     }
 }
 
