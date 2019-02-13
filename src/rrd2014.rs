@@ -14,7 +14,6 @@ use failure::Fail;
 
 use internal::EnvError;
 use internal::Kind as IKind;
-use internal::Record;
 use internal::Shift;
 use internal::Term as ITerm;
 use internal::Type as IType;
@@ -387,10 +386,10 @@ impl Elaboration for Binding {
             Val(ref id, ref e) => {
                 let (t, ty) = e.elaborate(env)?;
                 Ok((
-                    ITerm::Record(Record::from_iter(vec![(
+                    ITerm::record(vec![(
                         Label::from(id.clone()),
                         SemanticTerm::Term(t).into(),
-                    )])),
+                    )]),
                     Existential::from(HashMap::from_iter(vec![(
                         Label::from(id.clone()),
                         AtomicTerm(ty),
@@ -402,10 +401,10 @@ impl Elaboration for Binding {
                     .elaborate(env)
                     .map_err(|e| TypeError::TypeBinding(id.clone(), Box::new(e)))?;
                 Ok((
-                    ITerm::Record(Record::from_iter(vec![(
+                    ITerm::record(vec![(
                         Label::from(id.clone()),
                         SemanticTerm::Type(ty.clone(), k.clone()).into(),
-                    )])),
+                    )]),
                     Existential::from(HashMap::from_iter(vec![(
                         Label::from(id.clone()),
                         AtomicType(ty, k),
@@ -599,7 +598,7 @@ mod tests {
             Expr::abs(Ident::from("x"), Int(55)),
             (
                 ITerm::abs(
-                    IType::Record(Record::from_iter(vec![(Label::Val, IType::var(0))])),
+                    IType::record(vec![(Label::Val, IType::var(0))]),
                     ITerm::Int(55)
                 ),
                 IType::fun(IType::var(0), IType::Int)
@@ -611,7 +610,7 @@ mod tests {
             (
                 ITerm::app(
                     ITerm::abs(
-                        IType::Record(Record::from_iter(vec![(Label::Val, IType::Int)])),
+                        IType::record(vec![(Label::Val, IType::Int)]),
                         ITerm::Int(55)
                     ),
                     ITerm::Int(98)
@@ -640,11 +639,11 @@ mod tests {
             ),
             (
                 ITerm::abs(
-                    IType::Record(Record::from_iter(vec![(Label::Val, IType::var(0))])),
+                    IType::record(vec![(Label::Val, IType::var(0))]),
                     ITerm::Proj(
                         Box::new(ITerm::app(
                             ITerm::abs(
-                                IType::Record(Record::from_iter(vec![(Label::Val, IType::var(0))])),
+                                IType::record(vec![(Label::Val, IType::var(0))]),
                                 ITerm::var(0)
                             ),
                             ITerm::var(0)
@@ -666,10 +665,10 @@ mod tests {
         assert_elaborate_ok!(
             Val(Ident::from("x"), Expr::Int(23)),
             (
-                ITerm::Record(Record::from_iter(vec![(
+                ITerm::record(vec![(
                     Label::from("x"),
-                    ITerm::Record(Record::from_iter(vec![(Label::Val, ITerm::Int(23))]))
-                )])),
+                    ITerm::record(vec![(Label::Val, ITerm::Int(23))])
+                )]),
                 Existential::from(HashMap::from_iter(vec![(
                     Label::from("x"),
                     AtomicTerm(IType::Int)
@@ -680,16 +679,16 @@ mod tests {
         assert_elaborate_ok!(
             Val(Ident::from("x"), Expr::abs(Ident::from("y"), Expr::Int(22))),
             (
-                ITerm::Record(Record::from_iter(vec![(
+                ITerm::record(vec![(
                     Label::from("x"),
-                    ITerm::Record(Record::from_iter(vec![(
+                    ITerm::record(vec![(
                         Label::Val,
                         ITerm::abs(
-                            IType::Record(Record::from_iter(vec![(Label::Val, IType::var(0))])),
+                            IType::record(vec![(Label::Val, IType::var(0))]),
                             ITerm::Int(22)
                         )
-                    )]))
-                )])),
+                    )])
+                )]),
                 Existential::from(HashMap::from_iter(vec![(
                     Label::from("x"),
                     AtomicTerm(IType::fun(IType::var(0), IType::Int))
@@ -700,16 +699,16 @@ mod tests {
         assert_elaborate_ok!(
             Type(Ident::from("t"), T::Int),
             (
-                ITerm::Record(Record::from_iter(vec![(
+                ITerm::record(vec![(
                     Label::from("t"),
-                    ITerm::Record(Record::from_iter(vec![(
+                    ITerm::record(vec![(
                         Label::Typ,
                         ITerm::poly(
                             vec![IKind::fun(IKind::Mono, IKind::Mono)],
                             ITerm::abs(IType::app(IType::var(0), IType::Int), ITerm::var(0))
                         )
-                    )]))
-                )])),
+                    )])
+                )]),
                 Existential::from(HashMap::from_iter(vec![(
                     Label::from("t"),
                     AtomicType(IType::Int, IKind::Mono)
@@ -720,9 +719,9 @@ mod tests {
         assert_elaborate_ok!(
             Type(Ident::from("t"), T::fun(T::Int, T::Int)),
             (
-                ITerm::Record(Record::from_iter(vec![(
+                ITerm::record(vec![(
                     Label::from("t"),
-                    ITerm::Record(Record::from_iter(vec![(
+                    ITerm::record(vec![(
                         Label::Typ,
                         ITerm::poly(
                             vec![IKind::fun(IKind::Mono, IKind::Mono)],
@@ -731,8 +730,8 @@ mod tests {
                                 ITerm::var(0)
                             )
                         )
-                    )]))
-                )])),
+                    )])
+                )]),
                 Existential::from(HashMap::from_iter(vec![(
                     Label::from("t"),
                     AtomicType(IType::fun(IType::Int, IType::Int), IKind::Mono)

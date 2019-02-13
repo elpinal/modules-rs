@@ -281,10 +281,10 @@ impl From<super::SemanticSig> for Type {
     fn from(st: super::SemanticSig) -> Self {
         use super::SemanticSig::*;
         match st {
-            AtomicTerm(ty) => Type::Record(Record::from_iter(vec![(Label::Val, ty)])),
+            AtomicTerm(ty) => Type::record(vec![(Label::Val, ty)]),
             AtomicType(mut ty, k) => {
                 ty.shift(1);
-                Type::Record(Record::from_iter(vec![(
+                Type::record(vec![(
                     Label::Typ,
                     Type::forall(
                         vec![Kind::fun(k, Kind::Mono)],
@@ -293,14 +293,11 @@ impl From<super::SemanticSig> for Type {
                             Type::app(Type::var(0), ty),
                         ),
                     ),
-                )]))
+                )])
             }
             AtomicSig(asig) => {
                 let ty = Type::from(asig);
-                Type::Record(Record::from_iter(vec![(
-                    Label::Sig,
-                    Type::fun(ty.clone(), ty),
-                )]))
+                Type::record(vec![(Label::Sig, Type::fun(ty.clone(), ty))])
             }
             StructureSig(m) => Type::Record(
                 m.into_iter()
@@ -346,21 +343,21 @@ impl From<super::SemanticTerm> for Term {
     fn from(st: super::SemanticTerm) -> Self {
         use super::SemanticTerm as ST;
         match st {
-            ST::Term(t) => Term::Record(Record::from_iter(vec![(Label::Val, t)])),
+            ST::Term(t) => Term::record(vec![(Label::Val, t)]),
             ST::Type(mut ty, k) => {
                 ty.shift(1);
-                Term::Record(Record::from_iter(vec![(
+                Term::record(vec![(
                     Label::Typ,
                     Term::poly(
                         vec![Kind::fun(k, Kind::Mono)],
                         Term::abs(Type::app(Type::var(0), ty), Term::var(0)),
                     ),
-                )]))
+                )])
             }
-            ST::Sig(asig) => Term::Record(Record::from_iter(vec![(
+            ST::Sig(asig) => Term::record(vec![(
                 Label::Sig,
                 Term::abs(Type::from(asig), Term::var(0)),
-            )])),
+            )]),
         }
     }
 }
@@ -1406,13 +1403,13 @@ mod tests {
                     Kind::fun(Kind::fun(Mono, Mono), Mono),
                     Mono
                 ],
-                Type::Record(Record::from_iter(vec![
+                Type::record(vec![
                     (label("a"), Type::var(3)),
                     (label("b"), Type::var(2)),
                     (label("c"), Type::var(0)),
                     (label("d"), Type::var(1)),
                     (label("e"), Type::var(4)),
-                ]))
+                ])
             ),
             Term::Pack(
                 Type::var(30),
@@ -1425,13 +1422,13 @@ mod tests {
                             Box::new(Term::Int(1)),
                             Type::some(
                                 vec![Kind::fun(Mono, Mono)],
-                                Type::Record(Record::from_iter(vec![
+                                Type::record(vec![
                                     (label("a"), Type::var(31)),
                                     (label("b"), Type::forall(vec![Mono], Type::var(0))),
                                     (label("c"), Type::var(0)),
                                     (label("d"), Type::var(1)),
                                     (label("e"), Type::var(1)),
-                                ],)),
+                                ])
                             ),
                         )),
                         Type::some(
@@ -1439,13 +1436,13 @@ mod tests {
                                 Kind::fun(Mono, Mono),
                                 Kind::fun(Mono, Kind::fun(Mono, Mono))
                             ],
-                            Type::Record(Record::from_iter(vec![
+                            Type::record(vec![
                                 (label("a"), Type::var(32)),
                                 (label("b"), Type::forall(vec![Mono], Type::var(0))),
                                 (label("c"), Type::var(0)),
                                 (label("d"), Type::var(1)),
                                 (label("e"), Type::var(2)),
-                            ],)),
+                            ])
                         ),
                     )),
                     Type::some(
@@ -1454,13 +1451,13 @@ mod tests {
                             Kind::fun(Mono, Kind::fun(Mono, Mono)),
                             Kind::fun(Kind::fun(Mono, Mono), Mono)
                         ],
-                        Type::Record(Record::from_iter(vec![
+                        Type::record(vec![
                             (label("a"), Type::var(33)),
                             (label("b"), Type::var(2)),
                             (label("c"), Type::var(0)),
                             (label("d"), Type::var(1)),
                             (label("e"), Type::var(3)),
-                        ],)),
+                        ])
                     ),
                 )),
                 Type::some(
@@ -1470,13 +1467,13 @@ mod tests {
                         Kind::fun(Kind::fun(Mono, Mono), Mono),
                         Mono
                     ],
-                    Type::Record(Record::from_iter(vec![
+                    Type::record(vec![
                         (label("a"), Type::var(3)),
                         (label("b"), Type::var(2)),
                         (label("c"), Type::var(0)),
                         (label("d"), Type::var(1)),
                         (label("e"), Type::var(4)),
-                    ],)),
+                    ])
                 ),
             )
         );
