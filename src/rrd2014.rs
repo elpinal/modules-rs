@@ -133,27 +133,33 @@ enum TypeError {
     Unification(Expr, internal::UnificationError),
 
     #[fail(display = "defining type {:?}: {}", _0, _1)]
-    TypeBinding(Ident, KindError),
+    TypeBinding(Ident, Box<TypeError>),
 
     #[fail(display = "environment error: {}", _0)]
     Env(EnvError),
 
-    #[fail(display = "kind error: {}", _0)]
+    #[fail(display = "internal kind error: {}", _0)]
     KindError(internal::KindError),
 
     #[fail(display = "not mono kind: {}", _0)]
     NotMono(internal::NotMonoError),
-}
 
-#[derive(Debug, Fail, PartialEq)]
-enum KindError {
     #[fail(display = "type {:?} is not well-kinded: {}", _0, _1)]
     IllKinded(Type, internal::NotMonoError),
+
+    #[fail(display = "{}", _0)]
+    Atomic(AtomicError),
 }
 
 impl From<EnvError> for TypeError {
     fn from(e: EnvError) -> Self {
         TypeError::Env(e)
+    }
+}
+
+impl From<AtomicError> for TypeError {
+    fn from(e: AtomicError) -> Self {
+        TypeError::Atomic(e)
     }
 }
 
@@ -330,7 +336,7 @@ impl Elaboration for Kind {
 
 impl Elaboration for Type {
     type Output = (IType, IKind);
-    type Error = KindError;
+    type Error = TypeError;
 
     fn elaborate(&self, env: &mut Env) -> Result<Self::Output, Self::Error> {
         use Type::*;
@@ -339,13 +345,17 @@ impl Elaboration for Type {
             Fun(ref ty1, ref ty2) => {
                 let (ty11, k1) = ty1.elaborate(env)?;
                 k1.mono()
-                    .map_err(|e| KindError::IllKinded(*ty1.clone(), e))?;
+                    .map_err(|e| TypeError::IllKinded(*ty1.clone(), e))?;
                 let (ty21, k2) = ty2.elaborate(env)?;
                 k2.mono()
-                    .map_err(|e| KindError::IllKinded(*ty2.clone(), e))?;
+                    .map_err(|e| TypeError::IllKinded(*ty2.clone(), e))?;
                 Ok((IType::fun(ty11, ty21), IKind::Mono))
             }
-            _ => unimplemented!(),
+            Path(ref p) => {
+                let (_, ssig) = p.elaborate(env)?;
+                let (ty, k) = ssig.get_atomic_type()?;
+                Ok((ty, k))
+            }
         }
     }
 }
@@ -384,7 +394,7 @@ impl Elaboration for Binding {
             Type(ref id, ref ty) => {
                 let (ty, k) = ty
                     .elaborate(env)
-                    .map_err(|e| TypeError::TypeBinding(id.clone(), e))?;
+                    .map_err(|e| TypeError::TypeBinding(id.clone(), Box::new(e)))?;
                 Ok((
                     ITerm::Record(Record::from_iter(vec![(
                         Label::from(id.clone()),
