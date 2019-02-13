@@ -476,6 +476,10 @@ impl Type {
         Type::App(Box::new(ty1), Box::new(ty2))
     }
 
+    pub fn record<I: IntoIterator<Item = (Label, Type)>>(iter: I) -> Self {
+        Type::Record(Record::from_iter(iter))
+    }
+
     /// Creates an n-ary existential type.
     ///
     /// # Examples
@@ -725,6 +729,42 @@ impl Term {
 
     pub fn app(t1: Term, t2: Term) -> Self {
         Term::App(Box::new(t1), Box::new(t2))
+    }
+
+    pub fn record<I: IntoIterator<Item = (Label, Term)>>(iter: I) -> Self {
+        Term::Record(Record::from_iter(iter))
+    }
+
+    /// Creates a successive projection.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use modules::rrd2014::internal::*;
+    /// use Term::Int;
+    ///
+    /// assert_eq!(Term::proj(Int(0), None), Int(0));
+    ///
+    /// assert_eq!(
+    ///     Term::proj(Int(1), vec![Label::from("a")]),
+    ///     Term::Proj(Box::new(Int(1)), Label::from("a"))
+    /// );
+    ///
+    /// assert_eq!(
+    ///     Term::proj(Int(1), vec![Label::from("r"), Label::from("u")]),
+    ///     Term::Proj(Box::new(Term::Proj(Box::new(Int(1)), Label::from("r"))), Label::from("u"))
+    /// );
+    ///
+    /// assert_eq!(
+    ///     Term::proj(Term::var(800), vec![Label::Sig, Label::from("u")]),
+    ///     Term::Proj(Box::new(Term::Proj(Box::new(Term::var(800)), Label::Sig)), Label::from("u"))
+    /// );
+    /// ```
+    pub fn proj<I>(t: Term, ls: I) -> Self
+    where
+        I: IntoIterator<Item = Label>,
+    {
+        ls.into_iter().fold(t, |t, l| Term::Proj(Box::new(t), l))
     }
 
     /// Creates an n-ary polymorphic function.
