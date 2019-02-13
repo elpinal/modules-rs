@@ -486,7 +486,11 @@ impl Expr {
                 let (t, ty, s) = e.infer(env)?;
                 env.drop_value(name, prev);
                 ty0.apply(&s);
-                Ok((ITerm::abs(ty0.clone(), t), IType::fun(ty0, ty), s))
+                Ok((
+                    ITerm::abs(SemanticSig::AtomicTerm(ty0.clone()).into(), t),
+                    IType::fun(ty0, ty),
+                    s,
+                ))
             }
             App(ref e1, ref e2) => {
                 let (mut t1, mut ty1, s1) = e1.infer(env)?;
@@ -578,6 +582,10 @@ mod tests {
             Type::fun(Int, Int),
             (IType::fun(IType::Int, IType::Int), Mono)
         );
+        assert_elaborate_err!(
+            Type::path(Module::Ident(Ident::from("t"))),
+            TypeError::Env(EnvError::UnboundName(Name::from("t")))
+        );
     }
 
     #[test]
@@ -590,7 +598,10 @@ mod tests {
         assert_elaborate_ok!(
             Expr::abs(Ident::from("x"), Int(55)),
             (
-                ITerm::abs(IType::var(0), ITerm::Int(55)),
+                ITerm::abs(
+                    IType::Record(Record::from_iter(vec![(Label::Val, IType::var(0))])),
+                    ITerm::Int(55)
+                ),
                 IType::fun(IType::var(0), IType::Int)
             )
         );
@@ -598,7 +609,13 @@ mod tests {
         assert_elaborate_ok!(
             Expr::app(Expr::abs(Ident::from("x"), Int(55)), Int(98)),
             (
-                ITerm::app(ITerm::abs(IType::Int, ITerm::Int(55)), ITerm::Int(98)),
+                ITerm::app(
+                    ITerm::abs(
+                        IType::Record(Record::from_iter(vec![(Label::Val, IType::Int)])),
+                        ITerm::Int(55)
+                    ),
+                    ITerm::Int(98)
+                ),
                 IType::Int
             )
         );
@@ -608,6 +625,34 @@ mod tests {
             TypeError::Unification(
                 Expr::app(Int(45), Int(98)),
                 UnificationError::NotUnifiable(IType::Int, IType::fun(IType::Int, IType::var(0)))
+            )
+        );
+
+        assert_elaborate_err!(
+            Expr::path(Module::Ident(Ident::from("x"))),
+            TypeError::Env(EnvError::UnboundName(Name::from("x")))
+        );
+
+        assert_elaborate_ok!(
+            Expr::abs(
+                Ident::from("x"),
+                Expr::path(Module::Ident(Ident::from("x")))
+            ),
+            (
+                ITerm::abs(
+                    IType::Record(Record::from_iter(vec![(Label::Val, IType::var(0))])),
+                    ITerm::Proj(
+                        Box::new(ITerm::app(
+                            ITerm::abs(
+                                IType::Record(Record::from_iter(vec![(Label::Val, IType::var(0))])),
+                                ITerm::var(0)
+                            ),
+                            ITerm::var(0)
+                        )),
+                        Label::Val
+                    )
+                ),
+                IType::fun(IType::var(0), IType::var(0))
             )
         );
     }
@@ -639,7 +684,10 @@ mod tests {
                     Label::from("x"),
                     ITerm::Record(Record::from_iter(vec![(
                         Label::Val,
-                        ITerm::abs(IType::var(0), ITerm::Int(22))
+                        ITerm::abs(
+                            IType::Record(Record::from_iter(vec![(Label::Val, IType::var(0))])),
+                            ITerm::Int(22)
+                        )
                     )]))
                 )])),
                 Existential::from(HashMap::from_iter(vec![(
