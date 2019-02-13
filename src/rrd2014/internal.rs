@@ -655,7 +655,7 @@ impl Type {
         }
     }
 
-    fn kind_of<T: Shift, S: Clone + Default>(
+    pub fn kind_of<T: Shift, S: Clone + Default>(
         &self,
         env: &mut Env<T, S>,
     ) -> Result<Kind, failure::Error> {

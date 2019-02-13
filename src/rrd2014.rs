@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::iter::FromIterator;
 
+use failure;
 use failure::Fail;
 
 use internal::EnvError;
@@ -408,6 +409,21 @@ impl Elaboration for Module {
             }
             _ => unimplemented!(),
         }
+    }
+}
+
+impl Elaboration for Path {
+    type Output = (ITerm, SemanticSig);
+    type Error = failure::Error;
+
+    fn elaborate(&self, env: &mut Env) -> Result<Self::Output, Self::Error> {
+        let (t, asig) = self.0.elaborate(env)?;
+        // Need shift?
+        IType::from(asig.0.body.clone()).kind_of(env)?.mono()?;
+        Ok((
+            ITerm::unpack(t, asig.0.qs.len(), asig.clone().into(), ITerm::var(0)),
+            asig.0.body,
+        ))
     }
 }
 
