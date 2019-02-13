@@ -181,6 +181,12 @@ impl From<String> for Ident {
     }
 }
 
+impl From<Module> for Path {
+    fn from(m: Module) -> Self {
+        Path(Box::new(m))
+    }
+}
+
 impl<T: Substitution> Substitution for Quantified<T> {
     fn apply(&mut self, s: &Subst) {
         let n = self.qs.len();
@@ -464,6 +470,10 @@ impl Expr {
         Expr::App(Box::new(e1), Box::new(e2))
     }
 
+    fn path(m: Module) -> Self {
+        Expr::Path(Path::from(m))
+    }
+
     fn infer(&self, env: &mut Env) -> Result<(ITerm, IType, Subst), TypeError> {
         use Expr::*;
         use IKind::*;
@@ -505,6 +515,10 @@ impl Expr {
 impl Type {
     fn fun(ty1: Type, ty2: Type) -> Self {
         Type::Fun(Box::new(ty1), Box::new(ty2))
+    }
+
+    fn path(m: Module) -> Self {
+        Type::Path(Path::from(m))
     }
 }
 
