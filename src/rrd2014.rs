@@ -10,7 +10,6 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::iter::FromIterator;
 
-use failure;
 use failure::Fail;
 
 use internal::EnvError;
@@ -138,6 +137,12 @@ enum TypeError {
 
     #[fail(display = "environment error: {}", _0)]
     Env(EnvError),
+
+    #[fail(display = "kind error: {}", _0)]
+    KindError(internal::KindError),
+
+    #[fail(display = "not mono kind: {}", _0)]
+    NotMono(internal::NotMonoError),
 }
 
 #[derive(Debug, Fail, PartialEq)]
@@ -414,12 +419,16 @@ impl Elaboration for Module {
 
 impl Elaboration for Path {
     type Output = (ITerm, SemanticSig);
-    type Error = failure::Error;
+    type Error = TypeError;
 
     fn elaborate(&self, env: &mut Env) -> Result<Self::Output, Self::Error> {
         let (t, asig) = self.0.elaborate(env)?;
         // Need shift?
-        IType::from(asig.0.body.clone()).kind_of(env)?.mono()?;
+        IType::from(asig.0.body.clone())
+            .kind_of(env)
+            .map_err(TypeError::KindError)?
+            .mono()
+            .map_err(TypeError::NotMono)?;
         Ok((
             ITerm::unpack(t, asig.0.qs.len(), asig.clone().into(), ITerm::var(0)),
             asig.0.body,

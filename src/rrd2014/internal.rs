@@ -5,7 +5,6 @@ use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::iter::FromIterator;
 
-use failure;
 use failure::Fail;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -84,7 +83,7 @@ pub struct Env<T, S> {
 }
 
 #[derive(Debug, Fail, PartialEq)]
-enum KindError {
+pub enum KindError {
     #[fail(display = "kind mismatch: {:?} and {:?}", _0, _1)]
     KindMismatch(Kind, Kind),
 
@@ -96,6 +95,9 @@ enum KindError {
 
     #[fail(display = "label {:?} in record: {}", _0, _1)]
     Record(Label, Box<KindError>),
+
+    #[fail(display = "environment error: {}", _0)]
+    Env(EnvError),
 }
 
 #[derive(Clone, Default)]
@@ -658,11 +660,11 @@ impl Type {
     pub fn kind_of<T: Shift, S: Clone + Default>(
         &self,
         env: &mut Env<T, S>,
-    ) -> Result<Kind, failure::Error> {
+    ) -> Result<Kind, KindError> {
         use Kind::Mono;
         use Type::*;
         match *self {
-            Var(v) => Ok(env.lookup_type(v)?.0),
+            Var(v) => Ok(env.lookup_type(v).map_err(KindError::Env)?.0),
             Fun(ref ty1, ref ty2) => {
                 let k1 = ty1.kind_of(env)?;
                 k1.mono().map_err(|e| KindError::NotMono(*ty1.clone(), e))?;
@@ -671,16 +673,12 @@ impl Type {
                 Ok(Mono)
             }
             Record(ref r) => {
-                r.0.iter()
-                    .try_for_each(|(l, ty)| -> Result<_, failure::Error> {
-                        ty.kind_of(env)?.mono().map_err(|e| {
-                            KindError::Record(
-                                l.clone(),
-                                Box::new(KindError::NotMono(ty.clone(), e)),
-                            )
-                        })?;
-                        Ok(())
+                r.0.iter().try_for_each(|(l, ty)| -> Result<_, KindError> {
+                    ty.kind_of(env)?.mono().map_err(|e| {
+                        KindError::Record(l.clone(), Box::new(KindError::NotMono(ty.clone(), e)))
                     })?;
+                    Ok(())
+                })?;
                 Ok(Mono)
             }
             Forall(ref k, ref ty) | Some(ref k, ref ty) => {
@@ -705,10 +703,10 @@ impl Type {
                         if *k11 == k2 {
                             Ok(*k12)
                         } else {
-                            Err(failure::Error::from(KindError::KindMismatch(*k11, k2)))
+                            Err(KindError::KindMismatch(*k11, k2))
                         }
                     }
-                    _ => Err(failure::Error::from(KindError::NotFunction(k1))),
+                    _ => Err(KindError::NotFunction(k1)),
                 }
             }
             Int => Ok(Mono),
@@ -1602,9 +1600,8 @@ mod tests {
 
     macro_rules! assert_kinding_err {
         ($ty:expr, $e:expr) => {{
-            use Option::Some as S;
             match $ty.kind_of::<(), ()>(&mut Env::default()) {
-                Err(e) => assert_eq!(e.downcast_ref(), S(&$e), "{:?}", e),
+                Err(e) => assert_eq!(e, $e, "{:?}", e),
                 Ok(k) => panic!("unexpectedly well-kinded: {:?}", k),
             }
         }};
@@ -1641,7 +1638,10 @@ mod tests {
             Mono
         );
 
-        assert_kinding_err!(Type::var(0), EnvError::UnboundTypeVariable(Variable(0)));
+        assert_kinding_err!(
+            Type::var(0),
+            KindError::Env(EnvError::UnboundTypeVariable(Variable(0)))
+        );
         assert_kinding_err!(
             Type::fun(Int, Type::abs(vec![Mono], Int)),
             KindError::NotMono(
