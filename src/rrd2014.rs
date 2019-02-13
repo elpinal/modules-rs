@@ -493,7 +493,11 @@ impl Expr {
                 Ok((ITerm::app(t1, t2), v, s))
             }
             Int(n) => Ok((ITerm::Int(n), IType::Int, Subst::default())),
-            _ => unimplemented!(),
+            Path(ref p) => {
+                let (t, ssig) = p.elaborate(env)?;
+                let ty = ssig.get_atomic_term()?;
+                Ok((ITerm::Proj(Box::new(t), Label::Val), ty, Subst::default()))
+            }
         }
     }
 }
