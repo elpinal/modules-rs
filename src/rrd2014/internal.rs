@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::iter::FromIterator;
 
+use failure;
 use failure::Fail;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -80,6 +81,15 @@ pub struct Env<T, S> {
 
     /// A name-to-index map.
     nmap: HashMap<Name, usize>,
+}
+
+#[derive(Debug, Fail, PartialEq)]
+enum KindError {
+    #[fail(display = "kind mismatch: {:?} and {:?}", _0, _1)]
+    KindMismatch(Kind, Kind),
+
+    #[fail(display = "not function kind: {:?}", _0)]
+    NotFunction(Kind),
 }
 
 #[derive(Clone, Default)]
@@ -605,6 +615,59 @@ impl Type {
             _ => unimplemented!(),
         }
     }
+
+    fn kind_of<T: Shift, S: Clone + Default>(
+        &self,
+        env: &mut Env<T, S>,
+    ) -> Result<Kind, failure::Error> {
+        use Kind::Mono;
+        use Type::*;
+        match *self {
+            Var(v) => Ok(env.lookup_type(v)?.0),
+            Fun(ref ty1, ref ty2) => {
+                let k1 = ty1.kind_of(env)?;
+                k1.mono()?;
+                let k2 = ty2.kind_of(env)?;
+                k2.mono()?;
+                Ok(Mono)
+            }
+            Record(ref r) => {
+                r.0.values()
+                    .try_for_each(|ty| -> Result<_, failure::Error> {
+                        ty.kind_of(env)?.mono()?;
+                        Ok(())
+                    })?;
+                Ok(Mono)
+            }
+            Forall(ref k, ref ty) | Some(ref k, ref ty) => {
+                env.insert_type(k.clone(), S::default());
+                ty.kind_of(env)?.mono()?;
+                env.drop_type();
+                Ok(Mono)
+            }
+            Abs(ref k1, ref ty) => {
+                env.insert_type(k1.clone(), S::default());
+                let k2 = ty.kind_of(env)?;
+                env.drop_type();
+                Ok(Kind::fun(k1.clone(), k2))
+            }
+            App(ref ty1, ref ty2) => {
+                let k1 = ty1.kind_of(env)?;
+                let k2 = ty2.kind_of(env)?;
+                match k1 {
+                    Kind::Fun(k11, k12) => {
+                        if *k11 == k2 {
+                            Ok(*k12)
+                        } else {
+                            Err(failure::Error::from(KindError::KindMismatch(*k11, k2)))
+                        }
+                    }
+                    _ => Err(failure::Error::from(KindError::NotFunction(k1))),
+                }
+            }
+            Int => Ok(Mono),
+        }
+    }
 }
 
 impl Term {
@@ -990,6 +1053,15 @@ impl<T, S> Env<T, S> {
         I: IntoIterator<Item = (Kind, S)>,
     {
         ks.into_iter().for_each(|(k, x)| self.insert_type(k, x));
+    }
+
+    fn drop_type(&mut self)
+    where
+        T: Shift,
+    {
+        self.tenv.pop();
+        self.tenv.iter_mut().for_each(|k| k.0.shift(-1));
+        self.venv.iter_mut().for_each(|x| x.shift(-1));
     }
 
     pub fn insert_value(&mut self, name: Name, x: T) -> Option<Variable> {
