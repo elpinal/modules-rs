@@ -457,9 +457,12 @@ impl Elaboration for Module {
                 let mut qs = Vec::new();
                 let mut body = HashMap::new();
                 let mut n = 0;
+                let enter_state = env.get_state();
                 for b in bs {
-                    n += 1;
                     let (t, ex) = b.elaborate(env)?;
+                    n += 1;
+                    env.insert_types(ex.0.qs.clone().into_iter().map(|(k, s)| (k, Some(s))));
+                    env.insert_dummy_value();
                     qs.extend(ex.0.qs.clone());
                     body.extend(ex.0.body.clone());
                     let mut w = Vec::new();
@@ -470,6 +473,7 @@ impl Elaboration for Module {
                             IType::from(ssig.clone()),
                         ));
                         n += 1;
+                        env.insert_value(Name::try_from(l.clone()).unwrap(), ssig.clone());
                     }
                     v.push((
                         t,
@@ -478,6 +482,8 @@ impl Elaboration for Module {
                         w,
                     ));
                 }
+                env.drop_types(qs.len());
+                env.drop_values_state(n, enter_state);
                 let m = ls.into_iter().flat_map(|(l, i)| {
                     Some((l.clone(), ITerm::proj(ITerm::var(n - i - 1), Some(l))))
                 });
@@ -828,6 +834,22 @@ mod tests {
                     Label::from("t"),
                     AtomicType(IType::fun(IType::Int, IType::Int), IKind::Mono)
                 )]))
+            )
+        );
+    }
+
+    #[test]
+    fn elaborate_module() {
+        use super::Module::*;
+        use super::Type as T;
+        use Binding::*;
+        use SemanticSig::*;
+
+        assert_elaborate_ok!(
+            Seq(vec![]),
+            (
+                ITerm::record(None),
+                Existential::from(StructureSig(HashMap::new()))
             )
         );
     }

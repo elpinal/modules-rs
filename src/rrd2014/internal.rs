@@ -82,6 +82,8 @@ pub struct Env<T, S> {
     nmap: HashMap<Name, usize>,
 }
 
+pub struct EnvState(HashMap<Name, usize>);
+
 #[derive(Debug, Fail, PartialEq)]
 pub enum KindError {
     #[fail(display = "kind mismatch: {:?} and {:?}", _0, _1)]
@@ -401,6 +403,17 @@ impl From<super::Ident> for Name {
 impl<'a> From<&'a super::Ident> for &'a Name {
     fn from(id: &'a super::Ident) -> Self {
         &id.0
+    }
+}
+
+impl TryFrom<Label> for Name {
+    type Error = String;
+
+    fn try_from(l: Label) -> Result<Self, Self::Error> {
+        match l {
+            Label::Label(name) => Ok(name),
+            _ => Err(format!("could not convert to name: {:?}", l)),
+        }
     }
 }
 
@@ -1145,6 +1158,16 @@ impl<T, S> Env<T, S> {
         self.venv.iter_mut().for_each(|x| x.shift(-1));
     }
 
+    pub fn drop_types(&mut self, n: usize)
+    where
+        T: Shift,
+    {
+        self.tenv.truncate(self.tenv.len() - n);
+        let m = isize::try_from(n).unwrap();
+        self.tenv.iter_mut().for_each(|k| k.0.shift(-m));
+        self.venv.iter_mut().for_each(|x| x.shift(-m));
+    }
+
     pub fn insert_value(&mut self, name: Name, x: T) -> Option<Variable> {
         let v = self.nmap.get(&name).map(|&n| Variable(n));
         self.nmap.insert(name, self.venv.len());
@@ -1163,6 +1186,15 @@ impl<T, S> Env<T, S> {
         } else {
             self.nmap.remove(&name);
         }
+    }
+
+    pub fn drop_values_state(&mut self, n: usize, state: EnvState) {
+        self.venv.truncate(self.venv.len() - n);
+        self.nmap = state.0;
+    }
+
+    pub fn get_state(&self) -> EnvState {
+        EnvState(self.nmap.clone())
     }
 
     pub fn unify<I>(&mut self, iter: I) -> Result<Subst, UnificationError>
