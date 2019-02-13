@@ -451,6 +451,53 @@ impl Elaboration for Module {
                 let (ssig, v) = env.lookup_value_by_name(id.into())?;
                 Ok((ITerm::Var(v), Existential::from(ssig)))
             }
+            Seq(ref bs) => {
+                let mut v = Vec::new();
+                let mut ls = HashMap::new();
+                let mut qs = Vec::new();
+                let mut body = HashMap::new();
+                let mut n = 0;
+                for b in bs {
+                    n += 1;
+                    let (t, ex) = b.elaborate(env)?;
+                    qs.extend(ex.0.qs.clone());
+                    body.extend(ex.0.body.clone());
+                    let mut w = Vec::new();
+                    for (i, (l, ssig)) in ex.0.body.iter().enumerate() {
+                        ls.insert(l.clone(), n);
+                        w.push((
+                            ITerm::proj(ITerm::var(i), Some(l.clone())),
+                            IType::from(ssig.clone()),
+                        ));
+                        n += 1;
+                    }
+                    v.push((
+                        t,
+                        ex.0.qs.len(),
+                        IType::from(ex.map(SemanticSig::StructureSig)),
+                        w,
+                    ));
+                }
+                let m = ls.into_iter().flat_map(|(l, i)| {
+                    Some((l.clone(), ITerm::proj(ITerm::var(n - i - 1), Some(l))))
+                });
+                let t = v.into_iter().rfold(
+                    ITerm::pack(
+                        ITerm::record(m),
+                        (0..qs.len()).map(IType::var).collect(),
+                        qs.iter().map(|p| p.0.clone()),
+                        SemanticSig::StructureSig(body.clone()).into(),
+                    ),
+                    |t0, (t, n, ty, w)| ITerm::unpack(t, n, ty, ITerm::let_in(w, t0)),
+                );
+                Ok((
+                    t,
+                    Existential(Quantified {
+                        qs,
+                        body: SemanticSig::StructureSig(body),
+                    }),
+                ))
+            }
             _ => unimplemented!(),
         }
     }
