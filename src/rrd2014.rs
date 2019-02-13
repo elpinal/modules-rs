@@ -294,7 +294,7 @@ trait Elaboration {
 
 #[derive(Debug, Fail, PartialEq)]
 enum AtomicError {
-    #[fail(display = "not atomic semantic signature: {:?}", _0)]
+    #[fail(display = "unexpected atomic semantic signature: {:?}", _0)]
     Atomic(SemanticSig),
 
     #[fail(display = "not atomic term: {:?}", _0)]
@@ -308,8 +308,10 @@ impl SemanticSig {
     fn atomic(&self) -> Result<(), AtomicError> {
         use SemanticSig::*;
         match *self {
-            AtomicTerm(..) | AtomicType(..) | AtomicSig(..) => Ok(()),
-            _ => Err(AtomicError::Atomic(self.clone())),
+            AtomicTerm(..) | AtomicType(..) | AtomicSig(..) => {
+                Err(AtomicError::Atomic(self.clone()))
+            }
+            _ => Ok(()),
         }
     }
 
@@ -411,6 +413,28 @@ impl Elaboration for Binding {
                     )])),
                 ))
             }
+            Module(ref id, ref m) => {
+                let (t, asig) = m.elaborate(env)?;
+                asig.0.body.atomic()?;
+                Ok((
+                    ITerm::unpack(
+                        t,
+                        asig.0.qs.len(),
+                        asig.clone().into(),
+                        ITerm::pack(
+                            ITerm::record(vec![(Label::from(id.clone()), ITerm::var(0))]),
+                            (0..asig.0.qs.len()).map(IType::var).collect(),
+                            asig.0.qs.iter().map(|p| p.0.clone()),
+                            StructureSig(HashMap::from_iter(Some((
+                                Label::from(id.clone()),
+                                asig.0.body.clone(),
+                            ))))
+                            .into(),
+                        ),
+                    ),
+                    asig.map(|ssig| HashMap::from_iter(vec![(Label::from(id.clone()), ssig)])),
+                ))
+            }
             _ => unimplemented!(),
         }
     }
@@ -457,6 +481,27 @@ impl<T> From<T> for Existential<T> {
             qs: vec![],
             body: x,
         })
+    }
+}
+
+impl<T> Quantified<T> {
+    fn map<F, U>(self, f: F) -> Quantified<U>
+    where
+        F: Fn(T) -> U,
+    {
+        Quantified {
+            qs: self.qs,
+            body: f(self.body),
+        }
+    }
+}
+
+impl<T> Existential<T> {
+    fn map<F, U>(self, f: F) -> Existential<U>
+    where
+        F: Fn(T) -> U,
+    {
+        Existential(self.0.map(f))
     }
 }
 
