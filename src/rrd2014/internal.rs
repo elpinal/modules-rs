@@ -90,6 +90,9 @@ enum KindError {
 
     #[fail(display = "not function kind: {:?}", _0)]
     NotFunction(Kind),
+
+    #[fail(display = "type {:?} does not have mono kind: {}", _0, _1)]
+    NotMono(Type, NotMonoError),
 }
 
 #[derive(Clone, Default)]
@@ -659,22 +662,26 @@ impl Type {
             Var(v) => Ok(env.lookup_type(v)?.0),
             Fun(ref ty1, ref ty2) => {
                 let k1 = ty1.kind_of(env)?;
-                k1.mono()?;
+                k1.mono().map_err(|e| KindError::NotMono(*ty1.clone(), e))?;
                 let k2 = ty2.kind_of(env)?;
-                k2.mono()?;
+                k2.mono().map_err(|e| KindError::NotMono(*ty2.clone(), e))?;
                 Ok(Mono)
             }
             Record(ref r) => {
                 r.0.values()
                     .try_for_each(|ty| -> Result<_, failure::Error> {
-                        ty.kind_of(env)?.mono()?;
+                        ty.kind_of(env)?
+                            .mono()
+                            .map_err(|e| KindError::NotMono(ty.clone(), e))?;
                         Ok(())
                     })?;
                 Ok(Mono)
             }
             Forall(ref k, ref ty) | Some(ref k, ref ty) => {
                 env.insert_type(k.clone(), S::default());
-                ty.kind_of(env)?.mono()?;
+                ty.kind_of(env)?
+                    .mono()
+                    .map_err(|e| KindError::NotMono(*ty.clone(), e))?;
                 env.drop_type();
                 Ok(Mono)
             }
@@ -1631,21 +1638,37 @@ mod tests {
         assert_kinding_err!(Type::var(0), EnvError::UnboundTypeVariable(Variable(0)));
         assert_kinding_err!(
             Type::fun(Int, Type::abs(vec![Mono], Int)),
-            NotMonoError(Kind::fun(Mono, Mono))
+            KindError::NotMono(
+                Type::abs(vec![Mono], Int),
+                NotMonoError(Kind::fun(Mono, Mono))
+            )
+        );
+        assert_kinding_err!(
+            Type::some(vec![Mono], Type::abs(vec![Mono], Int)),
+            KindError::NotMono(
+                Type::abs(vec![Mono], Int),
+                NotMonoError(Kind::fun(Mono, Mono))
+            )
         );
         assert_kinding_err!(
             Record(R::from_iter(vec![(
                 Label::from("a"),
                 Type::abs(vec![Mono], Type::var(0))
             )])),
-            NotMonoError(Kind::fun(Mono, Mono))
+            KindError::NotMono(
+                Type::abs(vec![Mono], Type::var(0)),
+                NotMonoError(Kind::fun(Mono, Mono))
+            )
         );
         assert_kinding_err!(
             Record(R::from_iter(vec![
                 (Label::from("a"), Int),
                 (Label::from("b"), Type::abs(vec![Mono], Type::var(0)))
             ])),
-            NotMonoError(Kind::fun(Mono, Mono))
+            KindError::NotMono(
+                Type::abs(vec![Mono], Type::var(0)),
+                NotMonoError(Kind::fun(Mono, Mono))
+            )
         );
         assert_kinding_err!(Type::app(Int, Int), KindError::NotFunction(Mono));
         assert_kinding_err!(
