@@ -535,6 +535,39 @@ impl Type {
             .fold(ty, |ty, k| Type::Forall(k, Box::new(ty)))
     }
 
+    /// Creates an n-ary type-level lambda abstraction.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use modules::rrd2014::internal::*;
+    /// use Type::Int;
+    /// use Kind::*;
+    ///
+    /// assert_eq!(Type::abs(None, Int), Int);
+    ///
+    /// assert_eq!(
+    ///     Type::abs(vec![Mono], Int),
+    ///     Type::Abs(Mono, Box::new(Int))
+    /// );
+    ///
+    /// assert_eq!(
+    ///     Type::abs(vec![Mono, Mono], Int),
+    ///     Type::Abs(Mono, Box::new(Type::Abs(Mono, Box::new(Int))))
+    /// );
+    ///
+    /// assert_eq!(
+    ///     Type::abs(vec![Kind::fun(Mono, Mono), Mono], Int),
+    ///     Type::Abs(Mono, Box::new(Type::Abs(Kind::fun(Mono, Mono), Box::new(Int))))
+    /// );
+    /// ```
+    pub fn abs<I>(ks: I, ty: Type) -> Self
+    where
+        I: IntoIterator<Item = Kind>,
+    {
+        ks.into_iter().fold(ty, |ty, k| Type::Abs(k, Box::new(ty)))
+    }
+
     fn map<F>(&mut self, f: &F, c: usize)
     where
         F: Fn(usize, Variable) -> Type,
@@ -1540,6 +1573,84 @@ mod tests {
                     Type::app(Type::var(0), Type::var(1)),
                 )
             )
+        );
+    }
+
+    impl Shift for () {
+        fn shift_above(&mut self, _: usize, _: isize) {}
+    }
+
+    macro_rules! assert_kinding_ok {
+        ($ty:expr, $k:expr) => {{
+            use Option::Some as S;
+            assert_eq!($ty.kind_of::<(), ()>(&mut Env::default()).ok(), S($k));
+        }};
+    }
+
+    macro_rules! assert_kinding_err {
+        ($ty:expr, $e:expr) => {{
+            use Option::Some as S;
+            match $ty.kind_of::<(), ()>(&mut Env::default()) {
+                Err(e) => assert_eq!(e.downcast_ref(), S(&$e), "{:?}", e),
+                Ok(k) => panic!("unexpectedly well-kinded: {:?}", k),
+            }
+        }};
+    }
+
+    #[test]
+    fn kinding() {
+        use super::Record as R;
+        use Kind::Mono;
+        use Type::*;
+
+        assert_kinding_ok!(Int, Mono);
+        assert_kinding_ok!(Type::fun(Int, Int), Mono);
+        assert_kinding_ok!(Type::forall(vec![Mono], Int), Mono);
+        assert_kinding_ok!(Type::some(vec![Kind::fun(Mono, Mono)], Int), Mono);
+        assert_kinding_ok!(Type::abs(vec![Mono], Int), Kind::fun(Mono, Mono));
+        assert_kinding_ok!(
+            Type::abs(vec![Kind::fun(Mono, Mono)], Int),
+            Kind::fun(Kind::fun(Mono, Mono), Mono)
+        );
+        assert_kinding_ok!(Type::app(Type::abs(vec![Mono], Int), Int), Mono);
+        assert_kinding_ok!(Type::abs(vec![Mono], Type::var(0)), Kind::fun(Mono, Mono));
+        assert_kinding_ok!(
+            Type::abs(vec![Kind::fun(Mono, Mono)], Type::var(0)),
+            Kind::fun(Kind::fun(Mono, Mono), Kind::fun(Mono, Mono))
+        );
+        assert_kinding_ok!(Record(R::from_iter(None)), Mono);
+        assert_kinding_ok!(Record(R::from_iter(vec![(Label::from("a"), Int)])), Mono);
+        assert_kinding_ok!(
+            Record(R::from_iter(vec![
+                (Label::from("a"), Int),
+                (Label::from("b"), Int)
+            ])),
+            Mono
+        );
+
+        assert_kinding_err!(Type::var(0), EnvError::UnboundTypeVariable(Variable(0)));
+        assert_kinding_err!(
+            Type::fun(Int, Type::abs(vec![Mono], Int)),
+            NotMonoError(Kind::fun(Mono, Mono))
+        );
+        assert_kinding_err!(
+            Record(R::from_iter(vec![(
+                Label::from("a"),
+                Type::abs(vec![Mono], Type::var(0))
+            )])),
+            NotMonoError(Kind::fun(Mono, Mono))
+        );
+        assert_kinding_err!(
+            Record(R::from_iter(vec![
+                (Label::from("a"), Int),
+                (Label::from("b"), Type::abs(vec![Mono], Type::var(0)))
+            ])),
+            NotMonoError(Kind::fun(Mono, Mono))
+        );
+        assert_kinding_err!(Type::app(Int, Int), KindError::NotFunction(Mono));
+        assert_kinding_err!(
+            Type::app(Type::abs(vec![Kind::fun(Mono, Mono)], Int), Int),
+            KindError::KindMismatch(Kind::fun(Mono, Mono), Mono)
         );
     }
 }
