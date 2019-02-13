@@ -461,13 +461,14 @@ impl Elaboration for Module {
                 for b in bs {
                     let (t, ex) = b.elaborate(env)?;
                     n += 1;
+                    let n0 = n;
                     env.insert_types(ex.0.qs.clone().into_iter().map(|(k, s)| (k, Some(s))));
                     env.insert_dummy_value();
                     qs.extend(ex.0.qs.clone());
                     body.extend(ex.0.body.clone());
                     let mut w = Vec::new();
                     for (i, (l, ssig)) in ex.0.body.iter().enumerate() {
-                        ls.insert(l.clone(), n);
+                        ls.insert(l.clone(), n0);
                         w.push((
                             ITerm::proj(ITerm::var(i), Some(l.clone())),
                             IType::from(ssig.clone()),
@@ -484,9 +485,9 @@ impl Elaboration for Module {
                 }
                 env.drop_types(qs.len());
                 env.drop_values_state(n, enter_state);
-                let m = ls.into_iter().flat_map(|(l, i)| {
-                    Some((l.clone(), ITerm::proj(ITerm::var(n - i - 1), Some(l))))
-                });
+                let m = ls
+                    .into_iter()
+                    .flat_map(|(l, i)| Some((l.clone(), ITerm::proj(ITerm::var(n - i), Some(l)))));
                 let t = v.into_iter().rfold(
                     ITerm::pack(
                         ITerm::record(m),
@@ -840,9 +841,11 @@ mod tests {
 
     #[test]
     fn elaborate_module() {
+        use super::Ident as I;
         use super::Module::*;
         use super::Type as T;
         use Binding::*;
+        use IKind::Mono as IMono;
         use SemanticSig::*;
 
         assert_elaborate_ok!(
@@ -850,6 +853,62 @@ mod tests {
             (
                 ITerm::record(None),
                 Existential::from(StructureSig(HashMap::new()))
+            )
+        );
+
+        assert_elaborate_ok!(
+            Seq(vec![Type(I::from("t"), T::Int)]),
+            (
+                ITerm::app(
+                    ITerm::abs(
+                        IType::record(vec![(
+                            Label::from("t"),
+                            IType::record(vec![(
+                                Label::Typ,
+                                IType::forall(
+                                    Some(IKind::fun(IMono, IMono)),
+                                    IType::fun(
+                                        IType::app(IType::var(0), IType::Int),
+                                        IType::app(IType::var(0), IType::Int)
+                                    )
+                                )
+                            )])
+                        )]),
+                        ITerm::app(
+                            ITerm::abs(
+                                IType::record(vec![(
+                                    Label::Typ,
+                                    IType::forall(
+                                        Some(IKind::fun(IMono, IMono)),
+                                        IType::fun(
+                                            IType::app(IType::var(0), IType::Int),
+                                            IType::app(IType::var(0), IType::Int)
+                                        )
+                                    )
+                                )]),
+                                ITerm::record(vec![(
+                                    Label::from("t"),
+                                    ITerm::proj(ITerm::var(1), Some(Label::from("t")))
+                                )])
+                            ),
+                            ITerm::proj(ITerm::var(0), Some(Label::from("t")))
+                        )
+                    ),
+                    ITerm::record(vec![(
+                        Label::from("t"),
+                        ITerm::record(vec![(
+                            Label::Typ,
+                            ITerm::poly(
+                                vec![IKind::fun(IKind::Mono, IKind::Mono)],
+                                ITerm::abs(IType::app(IType::var(0), IType::Int), ITerm::var(0))
+                            )
+                        )])
+                    )])
+                ),
+                Existential::from(StructureSig(HashMap::from_iter(vec![(
+                    Label::from("t"),
+                    AtomicType(IType::Int, IKind::Mono)
+                )])))
             )
         );
     }
