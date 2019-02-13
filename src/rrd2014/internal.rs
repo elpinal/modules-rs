@@ -93,6 +93,9 @@ enum KindError {
 
     #[fail(display = "type {:?} does not have mono kind: {}", _0, _1)]
     NotMono(Type, NotMonoError),
+
+    #[fail(display = "label {:?} in record: {}", _0, _1)]
+    Record(Label, Box<KindError>),
 }
 
 #[derive(Clone, Default)]
@@ -668,11 +671,14 @@ impl Type {
                 Ok(Mono)
             }
             Record(ref r) => {
-                r.0.values()
-                    .try_for_each(|ty| -> Result<_, failure::Error> {
-                        ty.kind_of(env)?
-                            .mono()
-                            .map_err(|e| KindError::NotMono(ty.clone(), e))?;
+                r.0.iter()
+                    .try_for_each(|(l, ty)| -> Result<_, failure::Error> {
+                        ty.kind_of(env)?.mono().map_err(|e| {
+                            KindError::Record(
+                                l.clone(),
+                                Box::new(KindError::NotMono(ty.clone(), e)),
+                            )
+                        })?;
                         Ok(())
                     })?;
                 Ok(Mono)
@@ -1655,9 +1661,12 @@ mod tests {
                 Label::from("a"),
                 Type::abs(vec![Mono], Type::var(0))
             )])),
-            KindError::NotMono(
-                Type::abs(vec![Mono], Type::var(0)),
-                NotMonoError(Kind::fun(Mono, Mono))
+            KindError::Record(
+                Label::from("a"),
+                Box::new(KindError::NotMono(
+                    Type::abs(vec![Mono], Type::var(0)),
+                    NotMonoError(Kind::fun(Mono, Mono))
+                ))
             )
         );
         assert_kinding_err!(
@@ -1665,9 +1674,12 @@ mod tests {
                 (Label::from("a"), Int),
                 (Label::from("b"), Type::abs(vec![Mono], Type::var(0)))
             ])),
-            KindError::NotMono(
-                Type::abs(vec![Mono], Type::var(0)),
-                NotMonoError(Kind::fun(Mono, Mono))
+            KindError::Record(
+                Label::from("b"),
+                Box::new(KindError::NotMono(
+                    Type::abs(vec![Mono], Type::var(0)),
+                    NotMonoError(Kind::fun(Mono, Mono))
+                ))
             )
         );
         assert_kinding_err!(Type::app(Int, Int), KindError::NotFunction(Mono));
