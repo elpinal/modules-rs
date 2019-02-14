@@ -147,7 +147,7 @@ enum TypeError {
     IllKinded(Type, internal::NotMonoError),
 
     #[fail(display = "{}", _0)]
-    Atomic(AtomicError),
+    Atomic(SemanticSigError),
 }
 
 impl From<EnvError> for TypeError {
@@ -156,8 +156,8 @@ impl From<EnvError> for TypeError {
     }
 }
 
-impl From<AtomicError> for TypeError {
-    fn from(e: AtomicError) -> Self {
+impl From<SemanticSigError> for TypeError {
+    fn from(e: SemanticSigError) -> Self {
         TypeError::Atomic(e)
     }
 }
@@ -316,9 +316,8 @@ trait Elaboration {
     fn elaborate(&self, env: &mut Env) -> Result<Self::Output, Self::Error>;
 }
 
-// TODO: Rename AtomicError -> SemanticSigError.
 #[derive(Debug, Fail, PartialEq)]
-enum AtomicError {
+enum SemanticSigError {
     #[fail(display = "unexpected atomic semantic signature: {:?}", _0)]
     Atomic(SemanticSig),
 
@@ -336,41 +335,41 @@ enum AtomicError {
 }
 
 impl SemanticSig {
-    fn atomic(&self) -> Result<(), AtomicError> {
+    fn atomic(&self) -> Result<(), SemanticSigError> {
         use SemanticSig::*;
         match *self {
             AtomicTerm(..) | AtomicType(..) | AtomicSig(..) => {
-                Err(AtomicError::Atomic(self.clone()))
+                Err(SemanticSigError::Atomic(self.clone()))
             }
             _ => Ok(()),
         }
     }
 
-    fn get_atomic_term(self) -> Result<IType, AtomicError> {
+    fn get_atomic_term(self) -> Result<IType, SemanticSigError> {
         match self {
             SemanticSig::AtomicTerm(ty) => Ok(ty),
-            _ => Err(AtomicError::AtomicTerm(self)),
+            _ => Err(SemanticSigError::AtomicTerm(self)),
         }
     }
 
-    fn get_atomic_type(self) -> Result<(IType, IKind), AtomicError> {
+    fn get_atomic_type(self) -> Result<(IType, IKind), SemanticSigError> {
         match self {
             SemanticSig::AtomicType(ty, k) => Ok((ty, k)),
-            _ => Err(AtomicError::AtomicType(self)),
+            _ => Err(SemanticSigError::AtomicType(self)),
         }
     }
 
-    fn get_atomic_sig(self) -> Result<AbstractSig, AtomicError> {
+    fn get_atomic_sig(self) -> Result<AbstractSig, SemanticSigError> {
         match self {
             SemanticSig::AtomicSig(asig) => Ok(*asig),
-            _ => Err(AtomicError::AtomicSig(self)),
+            _ => Err(SemanticSigError::AtomicSig(self)),
         }
     }
 
-    fn get_structure(self) -> Result<HashMap<Label, SemanticSig>, AtomicError> {
+    fn get_structure(self) -> Result<HashMap<Label, SemanticSig>, SemanticSigError> {
         match self {
             SemanticSig::StructureSig(m) => Ok(m),
-            _ => Err(AtomicError::Structure(self)),
+            _ => Err(SemanticSigError::Structure(self)),
         }
     }
 }
