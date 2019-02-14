@@ -654,6 +654,20 @@ impl Elaboration for Module {
                     }),
                 ))
             }
+            Seal(ref id, ref sig) => {
+                let (ssig, v) = env.lookup_value_by_name(id.into())?;
+                let asig = sig.elaborate(env)?;
+                let (t, tys) = ssig.r#match(env, &asig)?;
+                Ok((
+                    ITerm::pack(
+                        ITerm::app(t, ITerm::Var(v)),
+                        tys,
+                        asig.0.qs.iter().map(|p| p.0.clone()),
+                        asig.0.body.clone().into(),
+                    ),
+                    asig,
+                ))
+            }
             _ => unimplemented!(),
         }
     }
