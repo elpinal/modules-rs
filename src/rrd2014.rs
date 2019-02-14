@@ -151,6 +151,9 @@ enum TypeError {
 
     #[fail(display = "duplicate label: {:?}", _0)]
     DuplicateLabel(Label),
+
+    #[fail(display = "{:?} is not subtype of {:?}", _0, _1)]
+    NotSubtype(IType, IType),
 }
 
 impl From<EnvError> for TypeError {
@@ -317,6 +320,12 @@ trait Elaboration {
     type Error;
 
     fn elaborate(&self, env: &mut Env) -> Result<Self::Output, Self::Error>;
+}
+
+trait Subtype {
+    type Error;
+
+    fn subtype_of(&self, env: &mut Env, another: &Self) -> Result<ITerm, Self::Error>;
 }
 
 #[derive(Debug, Fail, PartialEq)]
@@ -653,6 +662,18 @@ impl Elaboration for Path {
             ITerm::unpack(t, asig.0.qs.len(), asig.clone().into(), ITerm::var(0)),
             asig.0.body,
         ))
+    }
+}
+
+impl Subtype for IType {
+    type Error = TypeError;
+
+    fn subtype_of(&self, _: &mut Env, another: &Self) -> Result<ITerm, Self::Error> {
+        if self.equal(another) {
+            Ok(ITerm::abs(self.clone(), ITerm::var(0)))
+        } else {
+            Err(TypeError::NotSubtype(self.clone(), another.clone()))
+        }
     }
 }
 

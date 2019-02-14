@@ -690,6 +690,12 @@ impl Type {
         }
     }
 
+    /// System F type equality.
+    pub fn equal(&self, ty: &Type) -> bool {
+        // TODO: beta-eta equivalence.
+        self == ty
+    }
+
     pub fn kind_of<T: Shift, S: Clone + Default>(
         &self,
         env: &mut Env<T, S>,
