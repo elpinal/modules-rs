@@ -1,5 +1,6 @@
 //! The internal language.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::convert::TryFrom;
@@ -85,6 +86,12 @@ pub struct Env<T, S> {
 }
 
 pub struct EnvState(HashMap<Name, usize>);
+
+#[derive(Debug, PartialEq)]
+pub struct Context<'a> {
+    tenv: Vec<Cow<'a, Kind>>,
+    venv: Vec<Cow<'a, Type>>,
+}
 
 #[derive(Debug, Fail, PartialEq)]
 pub enum KindError {
@@ -1341,6 +1348,46 @@ impl Subst {
             (v.add(d), ty)
         };
         Subst(self.0.into_iter().map(f).collect())
+    }
+}
+
+impl<'a> Context<'a> {
+    fn lookup_type(&self, v: Variable) -> Result<Cow<Kind>, EnvError> {
+        self.tenv
+            .iter()
+            .rev()
+            .nth(v.0)
+            .cloned()
+            .ok_or_else(|| EnvError::UnboundTypeVariable(v))
+    }
+
+    fn lookup_value(&self, v: Variable) -> Result<Cow<Type>, EnvError> {
+        self.venv
+            .iter()
+            .rev()
+            .nth(v.0)
+            .cloned()
+            .ok_or_else(|| EnvError::UnboundVariable(v))
+    }
+
+    fn insert_type(&mut self, k: Cow<'a, Kind>) {
+        self.tenv.push(k);
+        self.tenv.iter_mut().for_each(|k| k.to_mut().shift(1));
+        self.venv.iter_mut().for_each(|x| x.to_mut().shift(1));
+    }
+
+    fn drop_type(&mut self) {
+        self.tenv.pop();
+        self.tenv.iter_mut().for_each(|k| k.to_mut().shift(-1));
+        self.venv.iter_mut().for_each(|x| x.to_mut().shift(-1));
+    }
+
+    fn insert_value(&mut self, ty: Cow<'a, Type>) {
+        self.venv.push(ty);
+    }
+
+    fn drop_value(&mut self) {
+        self.venv.pop();
     }
 }
 
