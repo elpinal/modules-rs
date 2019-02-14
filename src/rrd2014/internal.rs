@@ -696,8 +696,8 @@ impl Type {
 
     /// System F type equality.
     pub fn equal(&self, ty: &Type) -> bool {
-        // TODO: beta-eta equivalence.
-        self == ty
+        // TODO: Make it efficient.
+        self.clone().reduce() == ty.clone().reduce()
     }
 
     fn reduce(self) -> Self {
