@@ -923,6 +923,27 @@ impl SemanticSig {
             .map(|v| self.lookup_instantiation(ssig, *v).expect("not explicit"))
             .collect()
     }
+
+    fn r#match(
+        &self,
+        env: &mut Env,
+        against: &AbstractSig,
+    ) -> Result<(ITerm, Vec<IType>), TypeError> {
+        let n = against.0.qs.len();
+        let tys = self.lookup_instantiations(
+            &against.0.body,
+            (0..n).map(internal::Variable::new).collect(),
+        );
+        let mut tys0 = tys.clone();
+        let ni = isize::try_from(n).unwrap();
+        tys0.shift(ni);
+        let mut ssig = against.0.body.clone();
+        let iter = (0..n).map(internal::Variable::new).zip(tys0);
+        ssig.apply(&Subst::from_iter(iter));
+        ssig.shift(-ni);
+        let t = self.subtype_of(env, &ssig)?;
+        Ok((t, tys))
+    }
 }
 
 #[cfg(test)]
