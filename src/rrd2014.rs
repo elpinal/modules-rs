@@ -891,6 +891,38 @@ impl SemanticSig {
     fn atomic_sig(qs: Vec<(IKind, StemFrom)>, body: SemanticSig) -> Self {
         SemanticSig::AtomicSig(Box::new(Existential(Quantified { qs, body })))
     }
+
+    fn lookup_instantiation(&self, ssig: &SemanticSig, v: internal::Variable) -> Option<IType> {
+        use SemanticSig::*;
+        match (self, ssig) {
+            (&AtomicType(ref ty1, _), &AtomicType(ref ty2, _)) => {
+                // Kind equality is later tested (maybe).
+                match *ty2 {
+                    IType::Var(v0) if v0 == v => Some(ty1.clone()),
+                    _ => None,
+                }
+            }
+            (&StructureSig(ref m1), &StructureSig(ref m2)) => {
+                for (l, ssig2) in m2.iter() {
+                    if let Some(ssig1) = m1.get(l) {
+                        if let Some(ty) = ssig1.lookup_instantiation(ssig2, v) {
+                            return Some(ty);
+                        }
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    /// Looks up instantiations.
+    /// Assumes at least `ssig` is *explicit* (see section 5.2).
+    fn lookup_instantiations(&self, ssig: &SemanticSig, vs: Vec<internal::Variable>) -> Vec<IType> {
+        vs.iter()
+            .map(|v| self.lookup_instantiation(ssig, *v).expect("not explicit"))
+            .collect()
+    }
 }
 
 #[cfg(test)]
