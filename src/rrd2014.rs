@@ -1519,6 +1519,66 @@ mod tests {
                 ])))
             )
         );
+
+        let id = I::from;
+        let l = internal::Label::from;
+        let proj = |x, y| ITerm::proj(x, Some(y));
+
+        assert_elaborate_ok!(
+            Seq(vec![
+                Module(id("M"), Seq(vec![])),
+                Module(id("N"), Seal(id("M"), Sig::Seq(vec![])))
+            ]),
+            (
+                ITerm::app(
+                    ITerm::abs(
+                        IType::record(Some((l("M"), IType::record(None)))),
+                        ITerm::app(
+                            ITerm::abs(
+                                IType::record(None),
+                                ITerm::app(
+                                    ITerm::abs(
+                                        IType::record(Some((l("N"), IType::record(None)))),
+                                        ITerm::app(
+                                            ITerm::abs(
+                                                IType::record(None),
+                                                ITerm::record(vec![
+                                                    (l("M"), proj(ITerm::var(3), l("M"))),
+                                                    (l("N"), proj(ITerm::var(1), l("N"))),
+                                                ])
+                                            ),
+                                            proj(ITerm::var(0), l("N"))
+                                        )
+                                    ),
+                                    ITerm::app(
+                                        ITerm::abs(
+                                            IType::record(None),
+                                            ITerm::record(Some((l("N"), ITerm::var(0))))
+                                        ),
+                                        ITerm::app(
+                                            ITerm::abs(IType::record(None), ITerm::record(None)),
+                                            ITerm::var(0)
+                                        )
+                                    )
+                                )
+                            ),
+                            proj(ITerm::var(0), l("M"))
+                        )
+                    ),
+                    ITerm::app(
+                        ITerm::abs(
+                            IType::record(None),
+                            ITerm::record(Some((l("M"), ITerm::var(0))))
+                        ),
+                        ITerm::record(None)
+                    )
+                ),
+                Existential::from(SemanticSig::structure_sig(vec![
+                    (l("M"), SemanticSig::structure_sig(None)),
+                    (l("N"), SemanticSig::structure_sig(None))
+                ]))
+            )
+        );
     }
 
     #[test]
