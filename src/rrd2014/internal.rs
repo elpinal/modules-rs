@@ -49,7 +49,7 @@ pub enum Type {
     Int,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Term {
     Var(Variable),
     Abs(Type, Box<Term>),

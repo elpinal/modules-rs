@@ -154,6 +154,12 @@ enum TypeError {
 
     #[fail(display = "{:?} is not subtype of {:?}", _0, _1)]
     NotSubtype(IType, IType),
+
+    #[fail(display = "type mismatch: {:?} {:?}", _0, _1)]
+    TypeMismatch(IType, IType),
+
+    #[fail(display = "missing label: {:?}", _0)]
+    MissingLabel(Label),
 }
 
 impl From<EnvError> for TypeError {
@@ -347,6 +353,13 @@ enum SemanticSigError {
 }
 
 impl SemanticSig {
+    fn structure_sig<I>(iter: I) -> Self
+    where
+        I: IntoIterator<Item = (Label, SemanticSig)>,
+    {
+        SemanticSig::StructureSig(HashMap::from_iter(iter))
+    }
+
     fn atomic(&self) -> Result<(), SemanticSigError> {
         use SemanticSig::*;
         match *self {
@@ -673,6 +686,56 @@ impl Subtype for IType {
             Ok(ITerm::abs(self.clone(), ITerm::var(0)))
         } else {
             Err(TypeError::NotSubtype(self.clone(), another.clone()))
+        }
+    }
+}
+
+impl Subtype for SemanticSig {
+    type Error = TypeError;
+
+    fn subtype_of(&self, env: &mut Env, another: &Self) -> Result<ITerm, Self::Error> {
+        use SemanticSig::*;
+        match (self, another) {
+            (&AtomicTerm(ref ty1), &AtomicTerm(ref ty2)) => {
+                let t = ty1.subtype_of(env, ty2)?;
+                Ok(ITerm::abs(
+                    IType::from(AtomicTerm(ty1.clone())),
+                    ITerm::from(SemanticTerm::Term(ITerm::app(
+                        t,
+                        ITerm::proj(ITerm::var(0), Some(Label::Val)),
+                    ))),
+                ))
+            }
+            (&AtomicType(ref ty1, ref k1), &AtomicType(ref ty2, ref k2)) => {
+                if k1 != k2 {
+                    Err(TypeError::KindError(internal::KindError::KindMismatch(
+                        k1.clone(),
+                        k2.clone(),
+                    )))?;
+                }
+                if !ty1.equal(ty2) {
+                    Err(TypeError::TypeMismatch(ty1.clone(), ty2.clone()))?;
+                }
+                Ok(ITerm::abs(
+                    IType::from(AtomicType(ty1.clone(), k1.clone())),
+                    ITerm::var(0),
+                ))
+            }
+            (&StructureSig(ref m1), &StructureSig(ref m2)) => {
+                let mut m = HashMap::new();
+                for (l, ssig2) in m2.iter() {
+                    let ssig1 = m1
+                        .get(l)
+                        .ok_or_else(|| TypeError::MissingLabel(l.clone()))?;
+                    let t = ssig1.subtype_of(env, ssig2)?;
+                    m.insert(
+                        l.clone(),
+                        ITerm::app(t, ITerm::proj(ITerm::var(0), Some(l.clone()))),
+                    );
+                }
+                Ok(ITerm::abs(IType::from(self.clone()), ITerm::record(m)))
+            }
+            _ => unimplemented!(),
         }
     }
 }
@@ -1505,6 +1568,159 @@ mod tests {
                     (l("b"), AtomicType(IType::var(1), IKind::Mono)),
                     (l("c"), AtomicType(IType::var(0), IKind::Mono)),
                 ]))
+            )
+        );
+    }
+
+    macro_rules! assert_subtype_ok {
+        ($x:expr, $y:expr, $r:expr) => {{
+            let mut env = Env::default();
+            assert_eq!($x.subtype_of(&mut env, &$y), Ok($r));
+        }};
+    }
+
+    macro_rules! assert_subtype_err {
+        ($x:expr, $y:expr, $r:expr) => {{
+            let mut env = Env::default();
+            assert_eq!($x.subtype_of(&mut env, &$y), Err($r));
+        }};
+    }
+
+    #[test]
+    fn subtype_semantic_sig() {
+        use internal::Label::*;
+        use IKind as Kind;
+        use IKind::Mono;
+        use ITerm as Term;
+        use IType as Type;
+        use IType::Int;
+        use SemanticSig::*;
+
+        let l = internal::Label::from;
+
+        assert_subtype_ok!(
+            AtomicTerm(Int),
+            AtomicTerm(Int),
+            Term::abs(
+                Type::record(Some((Val, Int))),
+                Term::record(Some((
+                    Val,
+                    Term::app(
+                        Term::abs(Int, Term::var(0)),
+                        Term::proj(Term::var(0), Some(Val))
+                    )
+                )))
+            )
+        );
+
+        assert_subtype_err!(
+            AtomicTerm(Int),
+            AtomicTerm(Type::fun(Int, Int)),
+            TypeError::NotSubtype(Int, Type::fun(Int, Int))
+        );
+
+        assert_subtype_ok!(
+            AtomicType(Int, Mono),
+            AtomicType(Int, Mono),
+            Term::abs(
+                Type::record(Some((
+                    Typ,
+                    Type::forall(
+                        Some(Kind::fun(Mono, Mono)),
+                        Type::fun(Type::app(Type::var(0), Int), Type::app(Type::var(0), Int))
+                    )
+                ))),
+                Term::var(0)
+            )
+        );
+
+        assert_subtype_err!(
+            AtomicType(Int, Mono),
+            AtomicType(Int, Kind::fun(Mono, Mono)),
+            TypeError::KindError(internal::KindError::KindMismatch(
+                Mono,
+                Kind::fun(Mono, Mono)
+            ))
+        );
+
+        assert_subtype_err!(
+            AtomicType(Int, Mono),
+            AtomicType(Type::fun(Int, Int), Mono),
+            TypeError::TypeMismatch(Int, Type::fun(Int, Int))
+        );
+
+        assert_subtype_ok!(
+            SemanticSig::structure_sig(None),
+            SemanticSig::structure_sig(None),
+            Term::abs(Type::record(None), Term::record(None))
+        );
+
+        assert_subtype_ok!(
+            SemanticSig::structure_sig(Some((l("a"), AtomicTerm(Int)))),
+            SemanticSig::structure_sig(None),
+            Term::abs(
+                Type::record(Some((l("a"), Type::record(Some((Val, Int)))))),
+                Term::record(None)
+            )
+        );
+
+        assert_subtype_ok!(
+            SemanticSig::structure_sig(Some((l("a"), AtomicTerm(Int)))),
+            SemanticSig::structure_sig(Some((l("a"), AtomicTerm(Int)))),
+            Term::abs(
+                Type::record(Some((l("a"), Type::record(Some((Val, Int)))))),
+                Term::record(Some((
+                    l("a"),
+                    Term::app(
+                        Term::abs(
+                            Type::record(Some((Val, Int))),
+                            Term::record(Some((
+                                Val,
+                                Term::app(
+                                    Term::abs(Int, Term::var(0)),
+                                    Term::proj(Term::var(0), Some(Val))
+                                )
+                            )))
+                        ),
+                        Term::proj(Term::var(0), Some(l("a")))
+                    )
+                )))
+            )
+        );
+
+        let t1 = Term::abs(
+            Type::record(Some((Val, Int))),
+            Term::record(Some((
+                Val,
+                Term::app(
+                    Term::abs(Int, Term::var(0)),
+                    Term::proj(Term::var(0), Some(Val)),
+                ),
+            ))),
+        );
+        assert_subtype_ok!(
+            SemanticSig::structure_sig(vec![
+                (l("a"), AtomicTerm(Int)),
+                (l("b"), AtomicTerm(Int)),
+                (l("c"), AtomicTerm(Int))
+            ]),
+            SemanticSig::structure_sig(vec![(l("a"), AtomicTerm(Int)), (l("b"), AtomicTerm(Int))]),
+            Term::abs(
+                Type::record(vec![
+                    (l("a"), Type::record(Some((Val, Int)))),
+                    (l("b"), Type::record(Some((Val, Int)))),
+                    (l("c"), Type::record(Some((Val, Int))))
+                ]),
+                Term::record(vec![
+                    (
+                        l("a"),
+                        Term::app(t1.clone(), Term::proj(Term::var(0), Some(l("a"))))
+                    ),
+                    (
+                        l("b"),
+                        Term::app(t1, Term::proj(Term::var(0), Some(l("b"))))
+                    )
+                ])
             )
         );
     }
