@@ -148,6 +148,9 @@ enum TypeError {
 
     #[fail(display = "{}", _0)]
     Atomic(SemanticSigError),
+
+    #[fail(display = "duplicate label: {:?}", _0)]
+    DuplicateLabel(Label),
 }
 
 impl From<EnvError> for TypeError {
@@ -468,6 +471,22 @@ impl Elaboration for Sig {
         use Sig::*;
         match *self {
             Path(ref p) => Ok(p.elaborate(env)?.1.get_atomic_sig()?),
+            Seq(ref ds) => {
+                let enter_state = env.get_state();
+                let ex = ds
+                    .iter()
+                    .try_fold(Existential::from(HashMap::new()), |acc, d| {
+                        let ex = d.elaborate(env)?;
+                        env.insert_types(ex.0.qs.clone().into_iter().map(|(k, s)| (k, Some(s))));
+                        for (l, ssig) in ex.0.body.iter() {
+                            env.insert_value(Name::try_from(l.clone()).unwrap(), ssig.clone());
+                        }
+                        acc.merge(ex)
+                    })?;
+                env.drop_types(ex.0.qs.len());
+                env.drop_values_state(ex.0.body.len(), enter_state);
+                Ok(ex.map(SemanticSig::StructureSig))
+            }
             Fun(ref id, ref domain, ref range) => {
                 let enter_state = env.get_state();
                 let asig1 = domain.elaborate(env)?;
@@ -702,6 +721,19 @@ impl<T> Universal<T> {
         F: FnOnce(T) -> U,
     {
         Universal(self.0.map(f))
+    }
+}
+
+impl Existential<HashMap<Label, SemanticSig>> {
+    fn merge(mut self, ex: Existential<HashMap<Label, SemanticSig>>) -> Result<Self, TypeError> {
+        for l in ex.0.body.keys() {
+            if self.0.body.contains_key(l) {
+                Err(TypeError::DuplicateLabel(l.clone()))?;
+            }
+        }
+        self.0.qs.extend(ex.0.qs);
+        self.0.body.extend(ex.0.body);
+        Ok(self)
     }
 }
 
