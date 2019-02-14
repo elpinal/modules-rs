@@ -676,6 +676,10 @@ impl<T> Quantified<T> {
 }
 
 impl<T> Existential<T> {
+    fn new(qs: Vec<(IKind, StemFrom)>, body: T) -> Self {
+        Existential(Quantified { qs, body })
+    }
+
     fn map<F, U>(self, f: F) -> Existential<U>
     where
         F: FnOnce(T) -> U,
@@ -1304,6 +1308,36 @@ mod tests {
                         AtomicType(IType::fun(IType::Int, IType::Int), IKind::Mono)
                     )
                 ])))
+            )
+        );
+    }
+
+    #[test]
+    fn elaborate_decl() {
+        use Decl::*;
+        use SemanticSig::*;
+
+        let id = Ident::from;
+        let l = Label::from;
+
+        assert_elaborate_ok!(
+            Val(id("a"), Type::Int),
+            Existential::from(HashMap::from_iter(Some((l("a"), AtomicTerm(IType::Int)))))
+        );
+
+        assert_elaborate_ok!(
+            ManType(id("a"), Type::Int),
+            Existential::from(HashMap::from_iter(Some((
+                l("a"),
+                AtomicType(IType::Int, IKind::Mono)
+            ))))
+        );
+
+        assert_elaborate_ok!(
+            AbsType(id("a"), Kind::Mono),
+            Existential::new(
+                vec![(IKind::Mono, StemFrom::from(id("a")))],
+                HashMap::from_iter(Some((l("a"), AtomicType(IType::var(0), IKind::Mono))))
             )
         );
     }
