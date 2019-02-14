@@ -3,6 +3,8 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::convert::TryFrom;
+use std::hash::BuildHasher;
+use std::hash::Hash;
 use std::iter::FromIterator;
 
 use failure::Fail;
@@ -161,6 +163,14 @@ impl<T: Shift> Shift for Option<T> {
 impl<T: Shift> Shift for Vec<T> {
     fn shift_above(&mut self, c: usize, d: isize) {
         self.iter_mut().for_each(|x| {
+            x.shift_above(c, d);
+        });
+    }
+}
+
+impl<K: Eq + Hash, T: Shift, S: BuildHasher> Shift for HashMap<K, T, S> {
+    fn shift_above(&mut self, c: usize, d: isize) {
+        self.values_mut().for_each(|x| {
             x.shift_above(c, d);
         });
     }
@@ -435,7 +445,10 @@ impl Variable {
     }
 
     fn add(self, d: isize) -> Self {
-        Variable(usize::try_from(isize::try_from(self.0).unwrap() + d).expect("negative index"))
+        Variable(
+            usize::try_from(isize::try_from(self.0).unwrap() + d)
+                .unwrap_or_else(|_| panic!("negative index: {:?} and {}", self, d)),
+        )
     }
 }
 
@@ -1164,6 +1177,8 @@ impl<T, S> Env<T, S> {
         self.venv.iter_mut().for_each(|x| x.shift(-1));
     }
 
+    /// One should probably use `drop_values_state` before `drop_value` in case indices in value
+    /// environment become negative and then the program panics.
     pub fn drop_types(&mut self, n: usize)
     where
         T: Shift,

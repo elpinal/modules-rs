@@ -483,8 +483,8 @@ impl Elaboration for Sig {
                         }
                         acc.merge(ex)
                     })?;
-                env.drop_types(ex.0.qs.len());
                 env.drop_values_state(ex.0.body.len(), enter_state);
+                env.drop_types(ex.0.qs.len());
                 Ok(ex.map(SemanticSig::StructureSig))
             }
             Fun(ref id, ref domain, ref range) => {
@@ -493,8 +493,8 @@ impl Elaboration for Sig {
                 env.insert_types(asig1.0.qs.clone().into_iter().map(|(k, s)| (k, Some(s))));
                 env.insert_value(Name::from(id.clone()), asig1.0.body.clone());
                 let asig2 = range.elaborate(env)?;
-                env.drop_types(asig1.0.qs.len());
                 env.drop_values_state(1, enter_state);
+                env.drop_types(asig1.0.qs.len());
                 Ok(Existential::from(SemanticSig::FunctorSig(
                     Universal::from(asig1).map(|ssig| Box::new(self::Fun(ssig, asig2))),
                 )))
@@ -610,8 +610,8 @@ impl Elaboration for Module {
                         w,
                     ));
                 }
-                env.drop_types(qs.len());
                 env.drop_values_state(n, enter_state);
+                env.drop_types(qs.len());
                 let m = ls
                     .into_iter()
                     .flat_map(|(l, i)| Some((l.clone(), ITerm::proj(ITerm::var(n - i), Some(l)))));
@@ -731,6 +731,7 @@ impl Existential<HashMap<Label, SemanticSig>> {
                 Err(TypeError::DuplicateLabel(l.clone()))?;
             }
         }
+        self.0.body.shift(isize::try_from(ex.0.qs.len()).unwrap());
         self.0.qs.extend(ex.0.qs);
         self.0.body.extend(ex.0.body);
         Ok(self)
@@ -1370,6 +1371,119 @@ mod tests {
             Existential::new(
                 vec![(IKind::Mono, StemFrom::from(id("a")))],
                 HashMap::from_iter(Some((l("a"), AtomicType(IType::var(0), IKind::Mono))))
+            )
+        );
+    }
+
+    #[test]
+    fn elaborate_sig() {
+        use super::Module as Mod;
+        use Decl::*;
+        use SemanticSig::*;
+        use Sig::*;
+
+        let id = Ident::from;
+        let l = Label::from;
+
+        assert_elaborate_ok!(Seq(vec![]), Existential::from(StructureSig(HashMap::new())));
+
+        assert_elaborate_ok!(
+            Seq(vec![Val(id("a"), Type::Int)]),
+            Existential::from(StructureSig(HashMap::from_iter(vec![(
+                l("a"),
+                AtomicTerm(IType::Int)
+            )])))
+        );
+
+        assert_elaborate_ok!(
+            Seq(vec![Val(id("a"), Type::Int), Val(id("b"), Type::Int)]),
+            Existential::from(StructureSig(HashMap::from_iter(vec![
+                (l("a"), AtomicTerm(IType::Int)),
+                (l("b"), AtomicTerm(IType::Int))
+            ])))
+        );
+
+        assert_elaborate_ok!(
+            Seq(vec![Val(id("a"), Type::Int), ManType(id("b"), Type::Int)]),
+            Existential::from(StructureSig(HashMap::from_iter(vec![
+                (l("a"), AtomicTerm(IType::Int)),
+                (l("b"), AtomicType(IType::Int, IKind::Mono))
+            ])))
+        );
+
+        assert_elaborate_ok!(
+            Seq(vec![AbsType(id("a"), Kind::Mono),]),
+            Existential::new(
+                vec![(IKind::Mono, id("a").into())],
+                StructureSig(HashMap::from_iter(vec![(
+                    l("a"),
+                    AtomicType(IType::var(0), IKind::Mono)
+                ),]))
+            )
+        );
+
+        assert_elaborate_ok!(
+            Seq(vec![
+                AbsType(id("a"), Kind::Mono),
+                ManType(id("b"), Type::Int)
+            ]),
+            Existential::new(
+                vec![(IKind::Mono, id("a").into())],
+                StructureSig(HashMap::from_iter(vec![
+                    (l("a"), AtomicType(IType::var(0), IKind::Mono)),
+                    (l("b"), AtomicType(IType::Int, IKind::Mono))
+                ]))
+            )
+        );
+
+        assert_elaborate_ok!(
+            Seq(vec![
+                AbsType(id("a"), Kind::Mono),
+                ManType(
+                    id("b"),
+                    Type::fun(Type::path(Mod::Ident(id("a"))), Type::Int)
+                ),
+                ManType(
+                    id("c"),
+                    Type::fun(Type::Int, Type::path(Mod::Ident(id("b"))))
+                )
+            ]),
+            Existential::new(
+                vec![(IKind::Mono, id("a").into())],
+                StructureSig(HashMap::from_iter(vec![
+                    (l("a"), AtomicType(IType::var(0), IKind::Mono)),
+                    (
+                        l("b"),
+                        AtomicType(IType::fun(IType::var(0), IType::Int), IKind::Mono)
+                    ),
+                    (
+                        l("c"),
+                        AtomicType(
+                            IType::fun(IType::Int, IType::fun(IType::var(0), IType::Int)),
+                            IKind::Mono
+                        )
+                    )
+                ]))
+            )
+        );
+
+        assert_elaborate_ok!(
+            Seq(vec![
+                AbsType(id("a"), Kind::Mono),
+                AbsType(id("b"), Kind::Mono),
+                AbsType(id("c"), Kind::Mono)
+            ]),
+            Existential::new(
+                vec![
+                    (IKind::Mono, id("a").into()),
+                    (IKind::Mono, id("b").into()),
+                    (IKind::Mono, id("c").into())
+                ],
+                StructureSig(HashMap::from_iter(vec![
+                    (l("a"), AtomicType(IType::var(2), IKind::Mono)),
+                    (l("b"), AtomicType(IType::var(1), IKind::Mono)),
+                    (l("c"), AtomicType(IType::var(0), IKind::Mono)),
+                ]))
             )
         );
     }
