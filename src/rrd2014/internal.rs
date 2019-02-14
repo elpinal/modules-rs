@@ -370,6 +370,12 @@ impl From<super::Ident> for Label {
     }
 }
 
+impl<'a> From<&'a super::Ident> for Label {
+    fn from(id: &'a super::Ident) -> Self {
+        Label::Label(Name::from(id.clone()))
+    }
+}
+
 impl From<Name> for Label {
     fn from(name: Name) -> Self {
         Label::Label(name)

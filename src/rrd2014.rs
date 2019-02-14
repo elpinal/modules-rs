@@ -162,6 +162,12 @@ impl From<AtomicError> for TypeError {
     }
 }
 
+impl From<!> for TypeError {
+    fn from(e: !) -> Self {
+        e
+    }
+}
+
 impl From<Name> for Ident {
     fn from(name: Name) -> Self {
         Ident(name)
@@ -183,6 +189,24 @@ impl From<String> for Ident {
 impl From<Module> for Path {
     fn from(m: Module) -> Self {
         Path(Box::new(m))
+    }
+}
+
+impl From<Ident> for StemFrom {
+    fn from(id: Ident) -> Self {
+        StemFrom {
+            id,
+            prefix: Default::default(),
+        }
+    }
+}
+
+impl<'a> From<&'a Ident> for StemFrom {
+    fn from(id: &'a Ident) -> Self {
+        StemFrom {
+            id: id.clone(),
+            prefix: Default::default(),
+        }
     }
 }
 
@@ -292,6 +316,7 @@ trait Elaboration {
     fn elaborate(&self, env: &mut Env) -> Result<Self::Output, Self::Error>;
 }
 
+// TODO: Rename AtomicError -> SemanticSigError.
 #[derive(Debug, Fail, PartialEq)]
 enum AtomicError {
     #[fail(display = "unexpected atomic semantic signature: {:?}", _0)]
@@ -303,8 +328,11 @@ enum AtomicError {
     #[fail(display = "not atomic type: {:?}", _0)]
     AtomicType(SemanticSig),
 
-    #[fail(display = "not atomic type: {:?}", _0)]
+    #[fail(display = "not atomic signature: {:?}", _0)]
     AtomicSig(SemanticSig),
+
+    #[fail(display = "not structure signature: {:?}", _0)]
+    Structure(SemanticSig),
 }
 
 impl SemanticSig {
@@ -338,11 +366,18 @@ impl SemanticSig {
             _ => Err(AtomicError::AtomicSig(self)),
         }
     }
+
+    fn get_structure(self) -> Result<HashMap<Label, SemanticSig>, AtomicError> {
+        match self {
+            SemanticSig::StructureSig(m) => Ok(m),
+            _ => Err(AtomicError::Structure(self)),
+        }
+    }
 }
 
 impl Elaboration for Kind {
     type Output = IKind;
-    type Error = ();
+    type Error = !;
 
     fn elaborate(&self, _: &mut Env) -> Result<Self::Output, Self::Error> {
         match *self {
@@ -384,6 +419,45 @@ impl Elaboration for Expr {
     fn elaborate(&self, env: &mut Env) -> Result<Self::Output, Self::Error> {
         let (t, ty, _) = self.infer(env)?;
         Ok((t, ty))
+    }
+}
+
+impl Elaboration for Decl {
+    type Output = Existential<HashMap<Label, SemanticSig>>;
+    type Error = TypeError;
+
+    fn elaborate(&self, env: &mut Env) -> Result<Self::Output, Self::Error> {
+        use Decl::*;
+        use SemanticSig::*;
+        let f = |id: &Ident, ssig: SemanticSig| {
+            Existential::from(HashMap::from_iter(Some((Label::from(id), ssig))))
+        };
+        match *self {
+            Val(ref id, ref ty) => {
+                let (ty, k) = ty.elaborate(env)?;
+                k.mono().map_err(TypeError::NotMono)?;
+                Ok(f(id, AtomicTerm(ty)))
+            }
+            ManType(ref id, ref ty) => {
+                let (ty, k) = ty.elaborate(env)?;
+                Ok(f(id, AtomicType(ty, k)))
+            }
+            AbsType(ref id, ref k) => {
+                let k = k.elaborate(env)?;
+                Ok(Existential(Quantified {
+                    qs: vec![(k.clone(), id.into())],
+                    body: HashMap::from_iter(Some((Label::from(id), AtomicType(IType::var(0), k)))),
+                }))
+            }
+            Module(ref id, ref sig) => Ok(sig
+                .elaborate(env)?
+                .map(|ssig| HashMap::from_iter(Some((Label::from(id), ssig))))),
+            Signature(ref id, ref sig) => {
+                let asig = sig.elaborate(env)?;
+                Ok(f(id, AtomicSig(Box::new(asig))))
+            }
+            Include(ref sig) => sig.elaborate(env)?.try_map(|ssig| ssig.get_structure()),
+        }
     }
 }
 
@@ -589,6 +663,17 @@ impl<T> Quantified<T> {
             body: f(self.body),
         }
     }
+
+    fn try_map<F, U, ER, EQ>(self, f: F) -> Result<Quantified<U>, ER>
+    where
+        F: FnOnce(T) -> Result<U, EQ>,
+        ER: From<EQ>,
+    {
+        Ok(Quantified {
+            qs: self.qs,
+            body: f(self.body)?,
+        })
+    }
 }
 
 impl<T> Existential<T> {
@@ -597,6 +682,14 @@ impl<T> Existential<T> {
         F: FnOnce(T) -> U,
     {
         Existential(self.0.map(f))
+    }
+
+    fn try_map<F, U, ER, EQ>(self, f: F) -> Result<Existential<U>, ER>
+    where
+        F: FnOnce(T) -> Result<U, EQ>,
+        ER: From<EQ>,
+    {
+        Ok(Existential(self.0.try_map(f)?))
     }
 }
 
