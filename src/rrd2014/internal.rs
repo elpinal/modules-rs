@@ -490,6 +490,10 @@ impl Kind {
             _ => Err(NotMonoError(self.clone())),
         }
     }
+
+    fn eta_reducible(&self, _: usize) -> bool {
+        true
+    }
 }
 
 impl Type {
@@ -694,6 +698,53 @@ impl Type {
     pub fn equal(&self, ty: &Type) -> bool {
         // TODO: beta-eta equivalence.
         self == ty
+    }
+
+    fn reduce(self) -> Self {
+        use Type::*;
+        match self {
+            Var(_) | Int => self,
+            Fun(ty1, ty2) => Type::fun(ty1.reduce(), ty2.reduce()),
+            Record(r) => Type::record(r.0.into_iter().map(|(l, ty)| (l, ty.reduce()))),
+            // TODO: Is there any case where kinds depends on types which are sensible about
+            // beta-eta equivalence?
+            Forall(k, ty) => Type::forall(vec![k], ty.reduce()),
+            Some(k, ty) => Type::some(vec![k], ty.reduce()),
+            Abs(k, ty) => match ty.reduce() {
+                App(mut ty1, ty2) if *ty2 == Var(Variable(0)) && ty1.eta_reducible(0) => {
+                    ty1.shift(-1);
+                    *ty1
+                }
+                ty => Type::abs(vec![k], ty),
+            },
+            App(ty1, ty2) => {
+                let mut ty2 = ty2.reduce();
+                match ty1.reduce() {
+                    // The kind is ignored.
+                    Abs(_, mut ty1) => {
+                        ty2.shift(1);
+                        ty1.subst(0, &ty2);
+                        ty1.shift(-1);
+                        ty1.reduce() // Well-kinded types may terminate (no proof, though).
+                    }
+                    ty1 => Type::app(ty1, ty2),
+                }
+            }
+        }
+    }
+
+    fn eta_reducible(&self, n: usize) -> bool {
+        use Type::*;
+        match *self {
+            Var(v) => v.0 != n,
+            Fun(ref ty1, ref ty2) => ty1.eta_reducible(n) && ty2.eta_reducible(n),
+            Record(ref r) => r.0.values().all(|ty| ty.eta_reducible(n)),
+            Forall(ref k, ref ty) => k.eta_reducible(n + 1) && ty.eta_reducible(n + 1),
+            Some(ref k, ref ty) => k.eta_reducible(n + 1) && ty.eta_reducible(n + 1),
+            Abs(ref k, ref ty) => k.eta_reducible(n + 1) && ty.eta_reducible(n + 1),
+            App(ref ty1, ref ty2) => ty1.eta_reducible(n) && ty2.eta_reducible(n),
+            Int => true,
+        }
     }
 
     pub fn kind_of<T: Shift, S: Clone + Default>(
