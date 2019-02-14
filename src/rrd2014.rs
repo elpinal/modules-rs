@@ -740,6 +740,30 @@ impl Subtype for SemanticSig {
     }
 }
 
+impl Subtype for AbstractSig {
+    type Error = TypeError;
+
+    fn subtype_of(&self, env: &mut Env, another: &Self) -> Result<ITerm, Self::Error> {
+        env.insert_types(self.0.qs.clone().into_iter().map(|(k, s)| (k, Some(s))));
+        let ty: IType = self.clone().into();
+        let (t, tys) = self.0.body.r#match(env, another)?;
+        Ok(ITerm::abs(
+            ty.clone(),
+            ITerm::unpack(
+                ITerm::var(0),
+                self.0.qs.len(),
+                ty,
+                ITerm::pack(
+                    ITerm::app(t, ITerm::var(0)),
+                    tys,
+                    another.0.qs.iter().map(|p| p.0.clone()),
+                    another.0.body.clone().into(),
+                ),
+            ),
+        ))
+    }
+}
+
 impl<T> From<T> for Existential<T> {
     fn from(x: T) -> Self {
         Existential(Quantified {
@@ -934,6 +958,7 @@ impl SemanticSig {
             &against.0.body,
             (0..n).map(internal::Variable::new).collect(),
         );
+        // TODO: Should be well-kindness of `tys` tested?.
         let mut tys0 = tys.clone();
         let ni = isize::try_from(n).unwrap();
         tys0.shift(ni);
