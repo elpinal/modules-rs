@@ -87,7 +87,7 @@ pub struct Env<T, S> {
 
 pub struct EnvState(HashMap<Name, usize>);
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Context<'a> {
     tenv: Vec<Cow<'a, Kind>>,
     venv: Vec<Cow<'a, Type>>,
@@ -109,6 +109,33 @@ pub enum KindError {
 
     #[fail(display = "environment error: {}", _0)]
     Env(EnvError),
+}
+
+#[derive(Debug, Fail, PartialEq)]
+pub enum TypeError {
+    #[fail(display = "type mismatch: {:?} and {:?}", _0, _1)]
+    TypeMismatch(Type, Type),
+
+    #[fail(display = "not function type: {:?}", _0)]
+    NotFunction(Type),
+
+    #[fail(display = "missing label: {:?}", _0)]
+    MissingLabel(Label),
+
+    #[fail(display = "not record type: {:?}", _0)]
+    NotRecord(Type),
+
+    #[fail(display = "not universal type: {:?}", _0)]
+    NotForall(Type),
+
+    #[fail(display = "not existential type: {:?}", _0)]
+    NotSome(Type),
+
+    #[fail(display = "environment error: {}", _0)]
+    Env(EnvError),
+
+    #[fail(display = "kind error: {}", _0)]
+    KindError(KindError),
 }
 
 #[derive(Clone, Default)]
@@ -293,6 +320,18 @@ impl<T: Substitution, S> Substitution for Env<T, S> {
     fn apply(&mut self, s: &Subst) {
         self.tenv.iter_mut().for_each(|p| p.0.apply(s));
         self.venv.iter_mut().for_each(|x| x.apply(s));
+    }
+}
+
+impl From<EnvError> for TypeError {
+    fn from(e: EnvError) -> Self {
+        TypeError::Env(e)
+    }
+}
+
+impl From<KindError> for TypeError {
+    fn from(e: KindError) -> Self {
+        TypeError::KindError(e)
     }
 }
 
@@ -501,6 +540,10 @@ impl Kind {
     fn eta_reducible(&self, _: usize) -> bool {
         true
     }
+
+    fn equal(&self, k: &Kind) -> bool {
+        self == k
+    }
 }
 
 impl Type {
@@ -666,6 +709,12 @@ impl Type {
             }
         };
         self.map(&f, 0)
+    }
+
+    fn subst_top(&mut self, ty: &mut Type) {
+        ty.shift(1);
+        self.subst(0, ty);
+        self.shift(-1);
     }
 
     fn subst_shift(&mut self, j: usize, ty: &Type, d: isize) {
@@ -1148,6 +1197,102 @@ impl Term {
             Term::let_in(Some((t1, ty)), t)
         }
     }
+
+    fn type_of<'a>(&'a self, ctx: &mut Context<'a>) -> Result<Type, TypeError> {
+        use Term::*;
+        match *self {
+            Var(v) => Ok(ctx.lookup_value(v)?.into_owned()),
+            Abs(ref ty1, ref t) => {
+                ctx.insert_value(Cow::Borrowed(ty1));
+                let ty2 = t.type_of(ctx)?;
+                ctx.drop_value();
+                Ok(Type::fun(ty1.clone(), ty2))
+            }
+            App(ref t1, ref t2) => {
+                let ty1 = t1.type_of(ctx)?.reduce();
+                let ty2 = t2.type_of(ctx)?.reduce();
+                match ty1 {
+                    Type::Fun(ty11, ty12) if ty11.equal(&ty2) => Ok(*ty12),
+                    Type::Fun(ty11, _) => Err(TypeError::TypeMismatch(*ty11, ty2)),
+                    _ => Err(TypeError::NotFunction(ty1)),
+                }
+            }
+            Record(ref r) => Ok(Type::Record(self::Record(
+                r.0.iter()
+                    .map(|(l, t)| Ok((l.clone(), t.type_of(ctx)?)))
+                    .collect::<Result<_, TypeError>>()?,
+            ))),
+            Proj(ref t, ref l) => match t.type_of(ctx)?.reduce() {
+                Type::Record(mut r) => {
+                    r.0.remove(l)
+                        .ok_or_else(|| TypeError::MissingLabel(l.clone()))
+                }
+                ty => Err(TypeError::NotRecord(ty)),
+            },
+            Poly(ref k, ref t) => {
+                ctx.insert_type(Cow::Borrowed(k));
+                let ty = t.type_of(ctx)?;
+                ctx.drop_type();
+                Ok(Type::forall(Some(k.clone()), ty))
+            }
+            Inst(ref t, ref ty2) => {
+                let ty1 = t.type_of(ctx)?.reduce();
+                match ty1 {
+                    Type::Forall(k1, mut ty) => {
+                        let k2 = ty2.kind_of::<_, ()>(&mut Env::from(ctx.clone()))?;
+                        if k1.equal(&k2) {
+                            ty.subst_top(&mut ty2.clone());
+                            Ok(*ty)
+                        } else {
+                            Err(TypeError::KindError(KindError::KindMismatch(k1, k2)))
+                        }
+                    }
+                    _ => Err(TypeError::NotForall(ty1)),
+                }
+            }
+            Pack(ref ty1, ref t, ref ty2) => {
+                ty2.kind_of::<_, ()>(&mut Env::from(ctx.clone()))?
+                    .mono()
+                    .map_err(|e| TypeError::KindError(KindError::NotMono(ty2.clone(), e)))?;
+                match *ty2 {
+                    Type::Some(ref k1, ref ty) => {
+                        let k2 = ty1.kind_of::<_, ()>(&mut Env::from(ctx.clone()))?;
+                        if k1.equal(&k2) {
+                            let ty0 = t.type_of(ctx)?;
+                            let mut ty = *ty.clone();
+                            ty.subst_top(&mut ty1.clone());
+                            if ty0 == ty {
+                                Ok(ty2.clone())
+                            } else {
+                                Err(TypeError::TypeMismatch(ty0, ty))
+                            }
+                        } else {
+                            Err(TypeError::KindError(KindError::KindMismatch(
+                                k1.clone(),
+                                k2,
+                            )))
+                        }
+                    }
+                    ref ty2 => Err(TypeError::NotSome(ty2.clone())),
+                }
+            }
+            Unpack(ref t1, ref t2) => match t1.type_of(ctx)? {
+                Type::Some(k, ty1) => {
+                    ctx.insert_type(Cow::Owned(k));
+                    ctx.insert_value(Cow::Owned(*ty1));
+                    let ty2 = t2.type_of(ctx)?;
+                    ctx.drop_value();
+                    ctx.drop_type();
+                    ty2.kind_of::<_, ()>(&mut Env::from(ctx.clone()))?
+                        .mono()
+                        .map_err(|e| TypeError::KindError(KindError::NotMono(ty2.clone(), e)))?;
+                    Ok(ty2)
+                }
+                ty1 => Err(TypeError::NotSome(ty1)),
+            },
+            Int(_) => Ok(Type::Int),
+        }
+    }
 }
 
 #[derive(Debug, Fail, PartialEq)]
@@ -1376,6 +1521,8 @@ impl<'a> Context<'a> {
         self.venv.iter_mut().for_each(|x| x.to_mut().shift(1));
     }
 
+    /// One should probably use `drop_value` prior to `drop_type` in case indices in value
+    /// environment become negative and then the program panics.
     fn drop_type(&mut self) {
         self.tenv.pop();
         self.tenv.iter_mut().for_each(|k| k.to_mut().shift(-1));
@@ -1388,6 +1535,24 @@ impl<'a> Context<'a> {
 
     fn drop_value(&mut self) {
         self.venv.pop();
+    }
+}
+
+impl<'a, S: Clone + Default> From<Context<'a>> for Env<Type, S> {
+    fn from(ctx: Context<'a>) -> Self {
+        Env {
+            tenv: ctx
+                .tenv
+                .into_iter()
+                .map(|k| (k.into_owned(), S::default()))
+                .collect(),
+            venv: ctx
+                .venv
+                .into_iter()
+                .map(|ty| Some(ty.into_owned()))
+                .collect(),
+            nmap: HashMap::new(),
+        }
     }
 }
 
