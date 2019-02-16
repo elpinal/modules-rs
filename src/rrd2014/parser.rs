@@ -4,13 +4,15 @@ use std::vec::IntoIter;
 
 use failure::Fail;
 
-#[derive(Debug, PartialEq)]
+use super::*;
+
+#[derive(Clone, Debug, PartialEq)]
 struct Position {
     line: usize,
     column: usize,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 enum TokenKind {
     Mono,
     Int,
@@ -42,7 +44,7 @@ enum TokenKind {
     IntLit(isize),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 struct Token {
     kind: TokenKind,
     pos: Position,
@@ -52,6 +54,11 @@ struct Lexer {
     line: usize,
     column: usize,
     src: Peekable<IntoIter<char>>,
+    filename: Option<String>,
+}
+
+struct Parser {
+    src: Peekable<IntoIter<Token>>,
     filename: Option<String>,
 }
 
@@ -263,6 +270,309 @@ fn keyword_or_ident(s: String) -> TokenKind {
         "sig" => TokenKind::Sig,
         "end" => TokenKind::End,
         _ => TokenKind::Ident(s),
+    }
+}
+
+impl Parser {
+    fn new(src: Vec<Token>) -> Self {
+        Parser {
+            src: src.into_iter().peekable(),
+            filename: None,
+        }
+    }
+
+    fn with_filename(src: Vec<Token>, filename: String) -> Self {
+        Parser {
+            src: src.into_iter().peekable(),
+            filename: Some(filename),
+        }
+    }
+
+    fn next_opt(&mut self) -> Option<Token> {
+        self.src.next()
+    }
+
+    fn proceed(&mut self) {
+        self.src.next();
+    }
+
+    fn peek(&mut self) -> Option<Token> {
+        self.src.peek().cloned()
+    }
+
+    fn kind(&mut self) -> Option<Kind> {
+        match self.next_opt()?.kind {
+            TokenKind::Mono => Some(Kind::Mono),
+            _ => None,
+        }
+    }
+
+    fn type_atom(&mut self) -> Option<Type> {
+        match self.peek() {
+            Some(Token {
+                kind: TokenKind::Int,
+                ..
+            }) => Some(Type::Int),
+            Some(Token {
+                kind: TokenKind::LParen,
+                ..
+            }) => {
+                self.proceed();
+                let ty = self.r#type()?;
+                self.expect(TokenKind::RParen)?;
+                Some(ty)
+            }
+            _ => None,
+        }
+    }
+
+    fn r#type(&mut self) -> Option<Type> {
+        let ty = self.type_atom()?;
+        match self.peek() {
+            Some(Token {
+                kind: TokenKind::Arrow,
+                ..
+            }) => Some(Type::fun(ty, self.r#type()?)),
+            _ => Some(ty),
+        }
+    }
+
+    fn expr_atom(&mut self) -> Option<Expr> {
+        match self.peek() {
+            Some(Token {
+                kind: TokenKind::IntLit(n),
+                ..
+            }) => Some(Expr::Int(n)),
+            Some(Token {
+                kind: TokenKind::LParen,
+                ..
+            }) => {
+                self.proceed();
+                let e = self.expr()?;
+                self.expect(TokenKind::RParen)?;
+                Some(e)
+            }
+            _ => None,
+        }
+    }
+
+    fn expect(&mut self, kind: TokenKind) -> Option<Token> {
+        match self.next_opt()? {
+            token if token.kind == kind => Some(token),
+            _ => None,
+        }
+    }
+
+    fn abs(&mut self) -> Option<Expr> {
+        match self.peek()?.kind {
+            TokenKind::Ident(s) => {
+                let id = Ident::from(s);
+                self.expect(TokenKind::Dot)?;
+                let e = self.expr()?;
+                Some(Expr::abs(id, e))
+            }
+            _ => None,
+        }
+    }
+
+    fn expr(&mut self) -> Option<Expr> {
+        match self.peek() {
+            Some(Token {
+                kind: TokenKind::Lambda,
+                ..
+            }) => {
+                self.proceed();
+                self.abs()
+            }
+            Some(_) => {
+                let mut e0 = self.expr_atom()?;
+                while let Some(e) = self.expr_atom() {
+                    e0 = Expr::app(e0, e);
+                }
+                Some(e0)
+            }
+            None => None,
+        }
+    }
+
+    fn decl(&mut self) -> Option<Decl> {
+        let token_opt = self.peek();
+        match token_opt?.kind {
+            TokenKind::Val => {
+                self.proceed();
+                self.val_decl()
+            }
+            TokenKind::Type => {
+                self.proceed();
+                self.type_decl()
+            }
+            TokenKind::Module => {
+                self.proceed();
+                self.module_decl()
+            }
+            TokenKind::Signature => {
+                self.proceed();
+                self.signature_decl()
+            }
+            TokenKind::Include => {
+                self.proceed();
+                self.include_decl()
+            }
+            _ => None,
+        }
+    }
+
+    fn ident(&mut self) -> Option<Ident> {
+        match self.next_opt()?.kind {
+            TokenKind::Ident(s) => Some(Ident::from(s)),
+            _ => None,
+        }
+    }
+
+    fn val_decl(&mut self) -> Option<Decl> {
+        let id = self.ident()?;
+        self.expect(TokenKind::Colon)?;
+        let ty = self.r#type()?;
+        Some(Decl::Val(id, ty))
+    }
+
+    fn type_decl(&mut self) -> Option<Decl> {
+        let id = self.ident()?;
+        match self.next_opt()?.kind {
+            TokenKind::Colon => {
+                let k = self.kind()?;
+                Some(Decl::AbsType(id, k))
+            }
+            TokenKind::Equal => {
+                let ty = self.r#type()?;
+                Some(Decl::ManType(id, ty))
+            }
+            _ => None,
+        }
+    }
+
+    fn module_decl(&mut self) -> Option<Decl> {
+        let id = self.ident()?;
+        self.expect(TokenKind::Colon)?;
+        let sig = self.signature()?;
+        Some(Decl::Module(id, sig))
+    }
+
+    fn signature_decl(&mut self) -> Option<Decl> {
+        let id = self.ident()?;
+        self.expect(TokenKind::Equal)?;
+        let sig = self.signature()?;
+        Some(Decl::Signature(id, sig))
+    }
+
+    fn include_decl(&mut self) -> Option<Decl> {
+        let sig = self.signature()?;
+        Some(Decl::Include(sig))
+    }
+
+    fn signature(&mut self) -> Option<Sig> {
+        match self.peek()?.kind {
+            TokenKind::Sig => {
+                let mut v = Vec::new();
+                while let Some(decl) = self.decl() {
+                    v.push(decl);
+                }
+                self.expect(TokenKind::End)?;
+                Some(Sig::Seq(v))
+            }
+            TokenKind::LParen => {
+                let id = self.ident()?;
+                self.expect(TokenKind::Colon)?;
+                let sig1 = self.signature()?;
+                self.expect(TokenKind::RParen)?;
+                self.expect(TokenKind::Arrow)?;
+                let sig2 = self.signature()?;
+                Some(Sig::fun(id, sig1, sig2))
+            }
+            _ => None,
+        }
+    }
+
+    fn binding(&mut self) -> Option<Binding> {
+        let token_opt = self.peek();
+        match token_opt?.kind {
+            TokenKind::Val => {
+                self.proceed();
+                self.val_binding()
+            }
+            TokenKind::Type => {
+                self.proceed();
+                self.type_binding()
+            }
+            TokenKind::Module => {
+                self.proceed();
+                self.module_binding()
+            }
+            TokenKind::Signature => {
+                self.proceed();
+                self.signature_binding()
+            }
+            TokenKind::Include => {
+                self.proceed();
+                self.include_binding()
+            }
+            _ => None,
+        }
+    }
+
+    fn val_binding(&mut self) -> Option<Binding> {
+        let id = self.ident()?;
+        self.expect(TokenKind::Equal)?;
+        let e = self.expr()?;
+        Some(Binding::Val(id, e))
+    }
+
+    fn type_binding(&mut self) -> Option<Binding> {
+        let id = self.ident()?;
+        self.expect(TokenKind::Equal)?;
+        let ty = self.r#type()?;
+        Some(Binding::Type(id, ty))
+    }
+
+    fn module_binding(&mut self) -> Option<Binding> {
+        let id = self.ident()?;
+        self.expect(TokenKind::Equal)?;
+        let m = self.module()?;
+        Some(Binding::Module(id, m))
+    }
+
+    fn signature_binding(&mut self) -> Option<Binding> {
+        let id = self.ident()?;
+        self.expect(TokenKind::Equal)?;
+        let sig = self.signature()?;
+        Some(Binding::Signature(id, sig))
+    }
+
+    fn include_binding(&mut self) -> Option<Binding> {
+        let m = self.module()?;
+        Some(Binding::Include(m))
+    }
+
+    fn module(&mut self) -> Option<Module> {
+        match self.peek()?.kind {
+            TokenKind::Struct => {
+                let mut v = Vec::new();
+                while let Some(binding) = self.binding() {
+                    v.push(binding);
+                }
+                self.expect(TokenKind::End)?;
+                Some(Module::Seq(v))
+            }
+            TokenKind::Fun => {
+                let id = self.ident()?;
+                self.expect(TokenKind::Colon)?;
+                let sig = self.signature()?;
+                self.expect(TokenKind::Arrow)?;
+                let m = self.module()?;
+                Some(Module::fun(id, sig, m))
+            }
+            _ => None,
+        }
     }
 }
 

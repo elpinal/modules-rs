@@ -986,6 +986,18 @@ impl SemanticSig {
     }
 }
 
+impl Sig {
+    fn fun(id: Ident, sig1: Sig, sig2: Sig) -> Self {
+        Sig::Fun(id, Box::new(sig1), Box::new(sig2))
+    }
+}
+
+impl Module {
+    fn fun(id: Ident, sig: Sig, m: Module) -> Self {
+        Module::Fun(id, sig, Box::new(m))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
