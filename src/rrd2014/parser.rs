@@ -254,6 +254,14 @@ impl Lexer {
             pos,
         })
     }
+
+    fn lex_all(&mut self) -> Vec<Token> {
+        let mut v = Vec::new();
+        while let Some(token) = self.lex() {
+            v.push(token);
+        }
+        v
+    }
 }
 
 fn keyword_or_ident(s: String) -> TokenKind {
@@ -576,6 +584,16 @@ impl Parser {
     }
 }
 
+fn parse<I>(src: I) -> Option<Module>
+where
+    I: IntoIterator<Item = char>,
+{
+    let mut l = Lexer::new(src.into_iter().collect());
+    let tokens = l.lex_all();
+    let mut p = Parser::new(tokens);
+    p.module()
+}
+
 #[cfg(test)]
 mod tests {
     #![warn(dead_code)]
@@ -604,5 +622,11 @@ mod tests {
                 pos: Position { line: 0, column: 0 }
             })
         );
+    }
+
+    #[test]
+    fn parse_module() {
+        let mut p = Parser::new(vec![]);
+        assert_eq!(p.module(), None);
     }
 }
