@@ -1,7 +1,11 @@
 use structopt::StructOpt;
 
+use failure::format_err;
+use failure::Error;
+
 use modules::rrd2014::elaborate;
 use modules::rrd2014::parser;
+use modules::rrd2014::Module;
 
 macro_rules! exitln {
     ( $code:expr, $($x:expr),* ) => {
@@ -34,23 +38,32 @@ enum Opt {
 }
 
 fn main() {
-    let opt = Opt::from_args();
+    if let Err(e) = run(Opt::from_args()) {
+        exitln!(1, "{}", e);
+    }
+}
+
+fn run(opt: Opt) -> Result<(), Error> {
     match opt {
-        Opt::Parse { file } => match parser::parse_file(&file) {
-            Ok(Some(m)) => println!("{:?}", m),
-            Ok(None) => exitln!(1, "parse error"),
-            Err(e) => exitln!(1, "{}", e),
-        },
-        Opt::Typecheck { file } => match parser::parse_file(&file) {
-            Ok(Some(m)) => match elaborate(m) {
-                Ok((t, asig)) => {
-                    println!("signature: {:?}", asig);
-                    println!("translated term: {:?}", t);
-                }
-                Err(e) => exitln!(1, "type error: {}", e),
-            },
-            Ok(None) => exitln!(1, "parse error"),
-            Err(e) => exitln!(1, "{}", e),
+        Opt::Parse { file } => {
+            println!("{:?}", parse(file)?);
+        }
+        Opt::Typecheck { file } => match elaborate(parse(file)?)? {
+            (t, asig) => {
+                println!("signature:");
+                println!("{:?}", asig);
+                println!();
+                println!("translated term:");
+                println!("{:?}", t);
+            }
         },
     }
+    Ok(())
+}
+
+fn parse<P>(file: P) -> Result<Module, Error>
+where
+    P: AsRef<std::path::Path>,
+{
+    parser::parse_file(&file)?.ok_or_else(|| format_err!("parse error"))
 }
