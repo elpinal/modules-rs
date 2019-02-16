@@ -354,18 +354,17 @@ impl Parser {
     }
 
     fn expr_atom(&mut self) -> Option<Expr> {
-        match self.peek() {
-            Some(Token {
-                kind: TokenKind::IntLit(n),
-                ..
-            }) => {
+        match self.peek()?.kind {
+            TokenKind::IntLit(n) => {
                 self.proceed();
                 Some(Expr::Int(n))
             }
-            Some(Token {
-                kind: TokenKind::LParen,
-                ..
-            }) => {
+            TokenKind::Ident(s) => {
+                self.proceed();
+                let m = self.module_ident(Ident::from(s))?;
+                Some(Expr::path(m))
+            }
+            TokenKind::LParen => {
                 self.proceed();
                 let e = self.expr()?;
                 self.expect(TokenKind::RParen)?;
@@ -391,7 +390,7 @@ impl Parser {
     }
 
     fn abs(&mut self) -> Option<Expr> {
-        match self.peek()?.kind {
+        match self.next_opt()?.kind {
             TokenKind::Ident(s) => {
                 let id = Ident::from(s);
                 self.expect(TokenKind::Dot)?;
@@ -514,6 +513,11 @@ impl Parser {
                 }
                 self.expect(TokenKind::End)?;
                 Some(Sig::Seq(v))
+            }
+            TokenKind::Ident(s) => {
+                self.proceed();
+                let m = self.module_ident(Ident::from(s))?;
+                Some(Sig::path(m))
             }
             TokenKind::LParen => {
                 self.proceed();

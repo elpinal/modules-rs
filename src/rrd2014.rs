@@ -987,6 +987,10 @@ impl SemanticSig {
 }
 
 impl Sig {
+    fn path(m: Module) -> Self {
+        Sig::Path(Path::from(m))
+    }
+
     fn fun(id: Ident, sig1: Sig, sig2: Sig) -> Self {
         Sig::Fun(id, Box::new(sig1), Box::new(sig2))
     }
