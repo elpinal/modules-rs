@@ -150,6 +150,10 @@ impl Lexer {
 
         let pos = self.pos();
         match self.peek()? {
+            ' ' | '\n' | '\t' => {
+                self.proceed();
+                self.lex()
+            }
             '*' => proceeding!(self.token(TokenKind::Mono)),
             '.' => proceeding!(self.token(TokenKind::Dot)),
             '(' => proceeding!(self.token(TokenKind::LParen)),
