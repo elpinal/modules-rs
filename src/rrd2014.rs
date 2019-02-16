@@ -5,6 +5,7 @@
 #![allow(dead_code)]
 
 pub mod internal;
+pub mod parser;
 
 use std::collections::HashMap;
 use std::convert::TryFrom;
