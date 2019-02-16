@@ -100,18 +100,18 @@ struct Quantified<T> {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct Existential<T>(Quantified<T>);
+pub struct Existential<T>(Quantified<T>);
 
 #[derive(Clone, Debug, PartialEq)]
-struct Universal<T>(Quantified<T>);
+pub struct Universal<T>(Quantified<T>);
 
 type AbstractSig = Existential<SemanticSig>;
 
 #[derive(Clone, Debug, PartialEq)]
-struct Fun(SemanticSig, AbstractSig);
+pub struct Fun(SemanticSig, AbstractSig);
 
 #[derive(Clone, Debug, PartialEq)]
-enum SemanticSig {
+pub enum SemanticSig {
     AtomicTerm(IType),
     AtomicType(IType, IKind),
     AtomicSig(Box<AbstractSig>),
@@ -128,7 +128,7 @@ enum SemanticTerm {
 type Env = internal::Env<SemanticSig, Option<StemFrom>>;
 
 #[derive(Debug, Fail, PartialEq)]
-enum TypeError {
+pub enum TypeError {
     #[fail(display = "type-checking {:?}: unification: {}", _0, _1)]
     Unification(Expr, internal::UnificationError),
 
@@ -329,6 +329,10 @@ trait Elaboration {
     fn elaborate(&self, env: &mut Env) -> Result<Self::Output, Self::Error>;
 }
 
+pub fn elaborate(m: Module) -> Result<(ITerm, AbstractSig), TypeError> {
+    m.elaborate(&mut Env::default())
+}
+
 trait Subtype {
     type Error;
 
@@ -336,7 +340,7 @@ trait Subtype {
 }
 
 #[derive(Debug, Fail, PartialEq)]
-enum SemanticSigError {
+pub enum SemanticSigError {
     #[fail(display = "unexpected atomic semantic signature: {:?}", _0)]
     Atomic(SemanticSig),
 
@@ -847,7 +851,7 @@ impl<T> Universal<T> {
     }
 }
 
-impl Existential<HashMap<Label, SemanticSig>> {
+impl<S: std::hash::BuildHasher> Existential<HashMap<Label, SemanticSig, S>> {
     fn merge(mut self, ex: Existential<HashMap<Label, SemanticSig>>) -> Result<Self, TypeError> {
         for l in ex.0.body.keys() {
             if self.0.body.contains_key(l) {
