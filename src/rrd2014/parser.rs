@@ -8,7 +8,7 @@ use failure::Fail;
 
 use super::*;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 struct Position {
     line: usize,
     column: usize,
@@ -326,7 +326,10 @@ impl Parser {
             Some(Token {
                 kind: TokenKind::Int,
                 ..
-            }) => Some(Type::Int),
+            }) => {
+                self.proceed();
+                Some(Type::Int)
+            }
             Some(Token {
                 kind: TokenKind::LParen,
                 ..
@@ -356,7 +359,10 @@ impl Parser {
             Some(Token {
                 kind: TokenKind::IntLit(n),
                 ..
-            }) => Some(Expr::Int(n)),
+            }) => {
+                self.proceed();
+                Some(Expr::Int(n))
+            }
             Some(Token {
                 kind: TokenKind::LParen,
                 ..
@@ -487,6 +493,7 @@ impl Parser {
     fn signature(&mut self) -> Option<Sig> {
         match self.peek()?.kind {
             TokenKind::Sig => {
+                self.proceed();
                 let mut v = Vec::new();
                 while let Some(decl) = self.decl() {
                     v.push(decl);
@@ -495,6 +502,7 @@ impl Parser {
                 Some(Sig::Seq(v))
             }
             TokenKind::LParen => {
+                self.proceed();
                 let id = self.ident()?;
                 self.expect(TokenKind::Colon)?;
                 let sig1 = self.signature()?;
@@ -570,6 +578,7 @@ impl Parser {
     fn module(&mut self) -> Option<Module> {
         match self.peek()?.kind {
             TokenKind::Struct => {
+                self.proceed();
                 let mut v = Vec::new();
                 while let Some(binding) = self.binding() {
                     v.push(binding);
@@ -578,6 +587,7 @@ impl Parser {
                 Some(Module::Seq(v))
             }
             TokenKind::Fun => {
+                self.proceed();
                 let id = self.ident()?;
                 self.expect(TokenKind::Colon)?;
                 let sig = self.signature()?;
@@ -642,8 +652,166 @@ mod tests {
     }
 
     #[test]
+    fn lexer() {
+        let mut l = Lexer::new(vec!['s', 't', 'r', 'u', 'c', 't', ' ', 'e', 'n', 'd']);
+
+        assert_eq!(
+            l.lex(),
+            Some(Token {
+                kind: TokenKind::Struct,
+                pos: Position { line: 0, column: 0 }
+            })
+        );
+
+        assert_eq!(
+            l.lex(),
+            Some(Token {
+                kind: TokenKind::End,
+                pos: Position { line: 0, column: 7 }
+            })
+        );
+    }
+
+    #[test]
+    fn parse_expr() {
+        let mut p = Parser::new(vec![Token {
+            kind: TokenKind::IntLit(33),
+            pos: Default::default(),
+        }]);
+        assert_eq!(p.expr_atom(), Some(Expr::Int(33)));
+
+        let mut p = Parser::new(vec![Token {
+            kind: TokenKind::IntLit(33),
+            pos: Default::default(),
+        }]);
+        assert_eq!(p.expr(), Some(Expr::Int(33)));
+    }
+
+    #[test]
+    fn parse_type() {
+        let mut p = Parser::new(vec![Token {
+            kind: TokenKind::Int,
+            pos: Default::default(),
+        }]);
+        assert_eq!(p.type_atom(), Some(Type::Int));
+
+        let mut p = Parser::new(vec![Token {
+            kind: TokenKind::Int,
+            pos: Default::default(),
+        }]);
+        assert_eq!(p.r#type(), Some(Type::Int));
+    }
+
+    #[test]
+    fn parse_binding() {
+        let mut p = Parser::new(vec![
+            Token {
+                kind: TokenKind::Type,
+                pos: Position { line: 0, column: 0 },
+            },
+            Token {
+                kind: TokenKind::Ident("t".to_string()),
+                pos: Position { line: 0, column: 5 },
+            },
+            Token {
+                kind: TokenKind::Equal,
+                pos: Position { line: 0, column: 7 },
+            },
+            Token {
+                kind: TokenKind::Int,
+                pos: Position { line: 0, column: 9 },
+            },
+        ]);
+        assert_eq!(
+            p.binding(),
+            Some(Binding::Type(Ident::from("t"), Type::Int))
+        );
+
+        let mut p = Parser::new(vec![
+            Token {
+                kind: TokenKind::Val,
+                pos: Position { line: 0, column: 0 },
+            },
+            Token {
+                kind: TokenKind::Ident("x".to_string()),
+                pos: Position { line: 0, column: 4 },
+            },
+            Token {
+                kind: TokenKind::Equal,
+                pos: Position { line: 0, column: 6 },
+            },
+            Token {
+                kind: TokenKind::IntLit(3),
+                pos: Position { line: 0, column: 8 },
+            },
+        ]);
+        assert_eq!(
+            p.binding(),
+            Some(Binding::Val(Ident::from("x"), Expr::Int(3)))
+        );
+    }
+
+    #[test]
     fn parse_module() {
         let mut p = Parser::new(vec![]);
         assert_eq!(p.module(), None);
+
+        let mut p = Parser::new(vec![
+            Token {
+                kind: TokenKind::Struct,
+                pos: Position { line: 0, column: 0 },
+            },
+            Token {
+                kind: TokenKind::End,
+                pos: Position { line: 0, column: 7 },
+            },
+        ]);
+        assert_eq!(p.module(), Some(Module::Seq(vec![])));
+
+        let mut p = Parser::new(vec![
+            Token {
+                kind: TokenKind::Struct,
+                pos: Position { line: 0, column: 0 },
+            },
+            Token {
+                kind: TokenKind::Type,
+                pos: Position { line: 0, column: 7 },
+            },
+            Token {
+                kind: TokenKind::Ident("t".to_string()),
+                pos: Position {
+                    line: 0,
+                    column: 12,
+                },
+            },
+            Token {
+                kind: TokenKind::Equal,
+                pos: Position {
+                    line: 0,
+                    column: 14,
+                },
+            },
+            Token {
+                kind: TokenKind::Int,
+                pos: Position {
+                    line: 0,
+                    column: 16,
+                },
+            },
+            Token {
+                kind: TokenKind::End,
+                pos: Position {
+                    line: 0,
+                    column: 20,
+                },
+            },
+        ]);
+        assert_eq!(
+            p.module(),
+            Some(Module::Seq(vec![Binding::Type(
+                Ident::from("t"),
+                Type::Int
+            )]))
+        );
     }
 }
