@@ -22,22 +22,22 @@ use internal::{Label, Name};
 use internal::{Subst, Substitution};
 
 #[derive(Clone, Debug, PartialEq)]
-struct Ident(Name);
+pub struct Ident(Name);
 
 #[derive(Clone, Debug, PartialEq)]
-enum Kind {
+pub enum Kind {
     Mono,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-enum Type {
+pub enum Type {
     Fun(Box<Type>, Box<Type>),
     Path(Path),
     Int,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-enum Expr {
+pub enum Expr {
     Abs(Ident, Box<Expr>),
     App(Box<Expr>, Box<Expr>),
     Path(Path),
@@ -45,10 +45,10 @@ enum Expr {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct Path(Box<Module>);
+pub struct Path(Box<Module>);
 
 #[derive(Clone, Debug, PartialEq)]
-enum Module {
+pub enum Module {
     Ident(Ident),
     Seq(Vec<Binding>),
     Proj(Box<Module>, Ident),
@@ -58,7 +58,7 @@ enum Module {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-enum Binding {
+pub enum Binding {
     Val(Ident, Expr),
     Type(Ident, Type),
     Module(Ident, Module),
@@ -67,7 +67,7 @@ enum Binding {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-enum Sig {
+pub enum Sig {
     Path(Path),
     Seq(Vec<Decl>),
     Fun(Ident, Box<Sig>, Box<Sig>),
@@ -75,10 +75,10 @@ enum Sig {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct Proj<T>(T, Vec<T>);
+pub struct Proj<T>(T, Vec<T>);
 
 #[derive(Clone, Debug, PartialEq)]
-enum Decl {
+pub enum Decl {
     Val(Ident, Type),
     ManType(Ident, Type),
     AbsType(Ident, Kind),

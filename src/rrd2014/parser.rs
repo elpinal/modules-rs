@@ -1,3 +1,5 @@
+use std::io;
+use std::io::Read;
 use std::iter::FromIterator;
 use std::iter::Peekable;
 use std::vec::IntoIter;
@@ -592,6 +594,17 @@ where
     let tokens = l.lex_all();
     let mut p = Parser::new(tokens);
     p.module()
+}
+
+pub fn parse_file<P>(filename: P) -> io::Result<Option<Module>>
+where
+    P: AsRef<std::path::Path>,
+{
+    use std::fs::File;
+    let mut s = String::new();
+    let mut f = File::open(filename)?;
+    f.read_to_string(&mut s)?;
+    Ok(parse(s.chars()))
 }
 
 #[cfg(test)]
