@@ -993,6 +993,10 @@ impl Sig {
 }
 
 impl Module {
+    fn proj(m: Module, id: Ident) -> Self {
+        Module::Proj(Box::new(m), id)
+    }
+
     fn fun(id: Ident, sig: Sig, m: Module) -> Self {
         Module::Fun(id, sig, Box::new(m))
     }

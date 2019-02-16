@@ -322,18 +322,12 @@ impl Parser {
     }
 
     fn type_atom(&mut self) -> Option<Type> {
-        match self.peek() {
-            Some(Token {
-                kind: TokenKind::Int,
-                ..
-            }) => {
+        match self.peek()?.kind {
+            TokenKind::Int => {
                 self.proceed();
                 Some(Type::Int)
             }
-            Some(Token {
-                kind: TokenKind::LParen,
-                ..
-            }) => {
+            TokenKind::LParen => {
                 self.proceed();
                 let ty = self.r#type()?;
                 self.expect(TokenKind::RParen)?;
@@ -345,11 +339,11 @@ impl Parser {
 
     fn r#type(&mut self) -> Option<Type> {
         let ty = self.type_atom()?;
-        match self.peek() {
-            Some(Token {
-                kind: TokenKind::Arrow,
-                ..
-            }) => Some(Type::fun(ty, self.r#type()?)),
+        match self.peek().map(|t| t.kind) {
+            Some(TokenKind::Arrow) => {
+                self.proceed();
+                Some(Type::fun(ty, self.r#type()?))
+            }
             _ => Some(ty),
         }
     }
@@ -575,6 +569,38 @@ impl Parser {
         Some(Binding::Include(m))
     }
 
+    fn module_ident(&mut self, id: Ident) -> Option<Module> {
+        match self.peek().map(|t| t.kind) {
+            Some(TokenKind::OpaqueSealing) => {
+                self.proceed();
+                let sig = self.signature()?;
+                Some(Module::Seal(id, sig))
+            }
+            Some(TokenKind::Ident(s)) => {
+                self.proceed();
+                Some(Module::App(id, Ident::from(s)))
+            }
+            Some(_) => None,
+            None => Some(Module::Ident(id)),
+        }
+    }
+
+    fn module_atom(&mut self) -> Option<Module> {
+        match self.peek()?.kind {
+            TokenKind::Ident(s) => {
+                self.proceed();
+                self.module_ident(Ident::from(s))
+            }
+            TokenKind::LParen => {
+                self.proceed();
+                let m = self.module()?;
+                self.expect(TokenKind::RParen)?;
+                Some(m)
+            }
+            _ => None,
+        }
+    }
+
     fn module(&mut self) -> Option<Module> {
         match self.peek()?.kind {
             TokenKind::Struct => {
@@ -595,7 +621,13 @@ impl Parser {
                 let m = self.module()?;
                 Some(Module::fun(id, sig, m))
             }
-            _ => None,
+            _ => {
+                let mut m0 = self.module_atom()?;
+                while let Some(id) = self.ident() {
+                    m0 = Module::proj(m0, id);
+                }
+                Some(m0)
+            }
         }
     }
 }
