@@ -64,6 +64,8 @@ struct Parser {
     filename: Option<String>,
 }
 
+struct State(Peekable<IntoIter<Token>>);
+
 #[derive(Debug, Fail, PartialEq)]
 enum LexError {
     #[fail(display = "unexpected end of file: line {}, column {}", _0, _1)]
@@ -302,6 +304,14 @@ impl Parser {
         }
     }
 
+    fn save(&self) -> State {
+        State(self.src.clone())
+    }
+
+    fn restore(&mut self, s: State) {
+        self.src = s.0
+    }
+
     fn next_opt(&mut self) -> Option<Token> {
         self.src.next()
     }
@@ -327,12 +337,17 @@ impl Parser {
                 self.proceed();
                 Some(Type::Int)
             }
-            TokenKind::Ident(s) => {
-                self.proceed();
-                let m = self.module_ident(Ident::from(s))?;
+            TokenKind::Ident(_) => {
+                let m = self.module()?;
                 Some(Type::path(m))
             }
             TokenKind::LParen => {
+                let state = self.save();
+                if let Some(m) = self.module() {
+                    return Some(Type::path(m));
+                } else {
+                    self.restore(state);
+                }
                 self.proceed();
                 let ty = self.r#type()?;
                 self.expect(TokenKind::RParen)?;
@@ -359,12 +374,17 @@ impl Parser {
                 self.proceed();
                 Some(Expr::Int(n))
             }
-            TokenKind::Ident(s) => {
-                self.proceed();
-                let m = self.module_ident(Ident::from(s))?;
+            TokenKind::Ident(_) => {
+                let m = self.module()?;
                 Some(Expr::path(m))
             }
             TokenKind::LParen => {
+                let state = self.save();
+                if let Some(m) = self.module() {
+                    return Some(Expr::path(m));
+                } else {
+                    self.restore(state);
+                }
                 self.proceed();
                 let e = self.expr()?;
                 self.expect(TokenKind::RParen)?;
@@ -514,12 +534,17 @@ impl Parser {
                 self.expect(TokenKind::End)?;
                 Some(Sig::Seq(v))
             }
-            TokenKind::Ident(s) => {
-                self.proceed();
-                let m = self.module_ident(Ident::from(s))?;
+            TokenKind::Ident(_) => {
+                let m = self.module()?;
                 Some(Sig::path(m))
             }
             TokenKind::LParen => {
+                let state = self.save();
+                if let Some(m) = self.module() {
+                    return Some(Sig::path(m));
+                } else {
+                    self.restore(state);
+                }
                 self.proceed();
                 let id = self.ident()?;
                 self.expect(TokenKind::Colon)?;
