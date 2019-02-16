@@ -327,6 +327,11 @@ impl Parser {
                 self.proceed();
                 Some(Type::Int)
             }
+            TokenKind::Ident(s) => {
+                self.proceed();
+                let m = self.module_ident(Ident::from(s))?;
+                Some(Type::path(m))
+            }
             TokenKind::LParen => {
                 self.proceed();
                 let ty = self.r#type()?;
@@ -580,8 +585,7 @@ impl Parser {
                 self.proceed();
                 Some(Module::App(id, Ident::from(s)))
             }
-            Some(_) => None,
-            None => Some(Module::Ident(id)),
+            _ => Some(Module::Ident(id)),
         }
     }
 
@@ -732,6 +736,81 @@ mod tests {
             pos: Default::default(),
         }]);
         assert_eq!(p.r#type(), Some(Type::Int));
+
+        let mut p = Parser::new(vec![Token {
+            kind: TokenKind::Ident("t".to_string()),
+            pos: Default::default(),
+        }]);
+        assert_eq!(
+            p.r#type(),
+            Some(Type::path(Module::Ident(Ident::from("t"))))
+        );
+    }
+
+    #[test]
+    fn parse_signature() {
+        let mut p = Parser::new(vec![
+            Token {
+                kind: TokenKind::Sig,
+                pos: Default::default(),
+            },
+            Token {
+                kind: TokenKind::Type,
+                pos: Default::default(),
+            },
+            Token {
+                kind: TokenKind::Ident("x".to_string()),
+                pos: Default::default(),
+            },
+            Token {
+                kind: TokenKind::Equal,
+                pos: Default::default(),
+            },
+            Token {
+                kind: TokenKind::Ident("t".to_string()),
+                pos: Default::default(),
+            },
+            Token {
+                kind: TokenKind::End,
+                pos: Default::default(),
+            },
+        ]);
+        assert_eq!(
+            p.signature(),
+            Some(Sig::Seq(vec![Decl::ManType(
+                Ident::from("x"),
+                Type::path(Module::Ident(Ident::from("t")))
+            )]))
+        );
+    }
+
+    #[test]
+    fn parse_decl() {
+        let mut p = Parser::new(vec![
+            Token {
+                kind: TokenKind::Type,
+                pos: Default::default(),
+            },
+            Token {
+                kind: TokenKind::Ident("x".to_string()),
+                pos: Default::default(),
+            },
+            Token {
+                kind: TokenKind::Equal,
+                pos: Default::default(),
+            },
+            Token {
+                kind: TokenKind::Ident("t".to_string()),
+                pos: Default::default(),
+            },
+        ]);
+        assert_eq!(
+            p.decl(),
+            Some(Decl::ManType(
+                Ident::from("x"),
+                Type::path(Module::Ident(Ident::from("t")))
+            ))
+        );
     }
 
     #[test]
@@ -780,6 +859,32 @@ mod tests {
         assert_eq!(
             p.binding(),
             Some(Binding::Val(Ident::from("x"), Expr::Int(3)))
+        );
+
+        let mut p = Parser::new(vec![
+            Token {
+                kind: TokenKind::Type,
+                pos: Default::default(),
+            },
+            Token {
+                kind: TokenKind::Ident("x".to_string()),
+                pos: Default::default(),
+            },
+            Token {
+                kind: TokenKind::Equal,
+                pos: Default::default(),
+            },
+            Token {
+                kind: TokenKind::Ident("t".to_string()),
+                pos: Default::default(),
+            },
+        ]);
+        assert_eq!(
+            p.binding(),
+            Some(Binding::Type(
+                Ident::from("x"),
+                Type::path(Module::Ident(Ident::from("t")))
+            ))
         );
     }
 
