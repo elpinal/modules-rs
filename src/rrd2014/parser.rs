@@ -382,6 +382,14 @@ impl Parser {
         }
     }
 
+    fn peek_expect(&mut self, kind: TokenKind) -> bool {
+        if let Some(token) = self.peek() {
+            token.kind == kind
+        } else {
+            false
+        }
+    }
+
     fn abs(&mut self) -> Option<Expr> {
         match self.peek()?.kind {
             TokenKind::Ident(s) => {
@@ -443,6 +451,13 @@ impl Parser {
 
     fn ident(&mut self) -> Option<Ident> {
         match self.next_opt()?.kind {
+            TokenKind::Ident(s) => Some(Ident::from(s)),
+            _ => None,
+        }
+    }
+
+    fn peek_ident(&mut self) -> Option<Ident> {
+        match self.peek()?.kind {
             TokenKind::Ident(s) => Some(Ident::from(s)),
             _ => None,
         }
@@ -627,7 +642,9 @@ impl Parser {
             }
             _ => {
                 let mut m0 = self.module_atom()?;
-                while let Some(id) = self.ident() {
+                while self.peek_expect(TokenKind::Dot) {
+                    self.proceed();
+                    let id = self.ident()?;
                     m0 = Module::proj(m0, id);
                 }
                 Some(m0)
