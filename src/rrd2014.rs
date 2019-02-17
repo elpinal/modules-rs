@@ -129,7 +129,7 @@ struct BindingInformation {
     t: ITerm,
     n: usize,
     ty: IType,
-    w: Vec<(ITerm, IType)>,
+    w: Vec<ITerm>,
 }
 
 type Env = internal::Env<SemanticSig, Option<StemFrom>>;
@@ -671,10 +671,7 @@ impl Elaboration for Module {
                     let mut w = Vec::new();
                     for (i, (l, ssig)) in ex.0.body.iter().enumerate() {
                         ls.insert(l.clone(), n0);
-                        w.push((
-                            ITerm::proj(ITerm::var(i), Some(l.clone())),
-                            IType::from(ssig.clone()),
-                        ));
+                        w.push(ITerm::proj(ITerm::var(i), Some(l.clone())));
                         n += 1;
                         env.insert_value(Name::try_from(l.clone()).unwrap(), ssig.clone());
                     }
@@ -1196,10 +1193,7 @@ mod tests {
             (
                 ITerm::abs(
                     IType::generated_var(0),
-                    ITerm::app(
-                        ITerm::abs(IType::generated_var(0), ITerm::var(0)),
-                        ITerm::var(0)
-                    ),
+                    ITerm::r#let(ITerm::var(0), ITerm::var(0)),
                 ),
                 IType::fun(IType::generated_var(0), IType::generated_var(0))
             )
@@ -1281,7 +1275,6 @@ mod tests {
         use super::Module::*;
         use super::Type as T;
         use Binding::*;
-        use IKind::Mono as IMono;
         use SemanticSig::*;
 
         assert_elaborate_ok_2!(
@@ -1295,42 +1288,21 @@ mod tests {
         assert_elaborate_ok_2!(
             Seq(vec![Type(I::from("t"), T::Int)]),
             (
-                ITerm::app(
-                    ITerm::abs(
-                        IType::record(vec![(
-                            Label::from("t"),
-                            IType::forall(
-                                Some(IKind::fun(IMono, IMono)),
-                                IType::fun(
-                                    IType::app(IType::var(0), IType::Int),
-                                    IType::app(IType::var(0), IType::Int)
-                                )
-                            )
-                        )]),
-                        ITerm::app(
-                            ITerm::abs(
-                                IType::forall(
-                                    Some(IKind::fun(IMono, IMono)),
-                                    IType::fun(
-                                        IType::app(IType::var(0), IType::Int),
-                                        IType::app(IType::var(0), IType::Int)
-                                    )
-                                ),
-                                ITerm::record(vec![(
-                                    Label::from("t"),
-                                    ITerm::proj(ITerm::var(1), Some(Label::from("t")))
-                                )])
-                            ),
-                            ITerm::proj(ITerm::var(0), Some(Label::from("t")))
-                        )
-                    ),
+                ITerm::r#let(
                     ITerm::record(vec![(
                         Label::from("t"),
                         ITerm::poly(
                             vec![IKind::fun(IKind::Mono, IKind::Mono)],
                             ITerm::abs(IType::app(IType::var(0), IType::Int), ITerm::var(0))
                         )
-                    )])
+                    )]),
+                    ITerm::r#let(
+                        ITerm::proj(ITerm::var(0), Some(Label::from("t"))),
+                        ITerm::record(vec![(
+                            Label::from("t"),
+                            ITerm::proj(ITerm::var(1), Some(Label::from("t")))
+                        )])
+                    )
                 ),
                 Existential::from(StructureSig(HashMap::from_iter(vec![(
                     Label::from("t"),
@@ -1345,90 +1317,42 @@ mod tests {
                 Type(I::from("s"), T::path(Ident(I::from("t"))))
             ]),
             (
-                ITerm::app(
-                    ITerm::abs(
-                        IType::record(vec![(
-                            Label::from("t"),
-                            IType::forall(
-                                Some(IKind::fun(IMono, IMono)),
-                                IType::fun(
-                                    IType::app(IType::var(0), IType::Int),
-                                    IType::app(IType::var(0), IType::Int)
-                                )
-                            )
-                        )]),
-                        ITerm::app(
-                            ITerm::abs(
-                                IType::forall(
-                                    Some(IKind::fun(IMono, IMono)),
-                                    IType::fun(
-                                        IType::app(IType::var(0), IType::Int),
-                                        IType::app(IType::var(0), IType::Int)
-                                    )
-                                ),
-                                ITerm::app(
-                                    ITerm::abs(
-                                        IType::record(vec![(
-                                            Label::from("s"),
-                                            IType::forall(
-                                                Some(IKind::fun(IMono, IMono)),
-                                                IType::fun(
-                                                    IType::app(IType::var(0), IType::Int),
-                                                    IType::app(IType::var(0), IType::Int)
-                                                )
-                                            )
-                                        )]),
-                                        ITerm::app(
-                                            ITerm::abs(
-                                                IType::forall(
-                                                    Some(IKind::fun(IMono, IMono)),
-                                                    IType::fun(
-                                                        IType::app(IType::var(0), IType::Int),
-                                                        IType::app(IType::var(0), IType::Int)
-                                                    )
-                                                ),
-                                                ITerm::record(vec![
-                                                    (
-                                                        Label::from("t"),
-                                                        ITerm::proj(
-                                                            ITerm::var(3),
-                                                            Some(Label::from("t"))
-                                                        )
-                                                    ),
-                                                    (
-                                                        Label::from("s"),
-                                                        ITerm::proj(
-                                                            ITerm::var(1),
-                                                            Some(Label::from("s"))
-                                                        )
-                                                    )
-                                                ])
-                                            ),
-                                            ITerm::proj(ITerm::var(0), Some(Label::from("s")))
-                                        )
-                                    ),
-                                    ITerm::record(vec![(
-                                        Label::from("s"),
-                                        ITerm::poly(
-                                            vec![IKind::fun(IKind::Mono, IKind::Mono)],
-                                            ITerm::abs(
-                                                IType::app(IType::var(0), IType::Int),
-                                                ITerm::var(0)
-                                            )
-                                        )
-                                    )])
-                                )
-                            ),
-                            ITerm::proj(ITerm::var(0), Some(Label::from("t")))
-                        )
-                    ),
+                ITerm::r#let(
                     ITerm::record(vec![(
                         Label::from("t"),
                         ITerm::poly(
                             vec![IKind::fun(IKind::Mono, IKind::Mono)],
                             ITerm::abs(IType::app(IType::var(0), IType::Int), ITerm::var(0))
                         )
-                    )])
+                    )]),
+                    ITerm::r#let(
+                        ITerm::proj(ITerm::var(0), Some(Label::from("t"))),
+                        ITerm::r#let(
+                            ITerm::record(vec![(
+                                Label::from("s"),
+                                ITerm::poly(
+                                    vec![IKind::fun(IKind::Mono, IKind::Mono)],
+                                    ITerm::abs(
+                                        IType::app(IType::var(0), IType::Int),
+                                        ITerm::var(0)
+                                    )
+                                )
+                            )]),
+                            ITerm::r#let(
+                                ITerm::proj(ITerm::var(0), Some(Label::from("s"))),
+                                ITerm::record(vec![
+                                    (
+                                        Label::from("t"),
+                                        ITerm::proj(ITerm::var(3), Some(Label::from("t")))
+                                    ),
+                                    (
+                                        Label::from("s"),
+                                        ITerm::proj(ITerm::var(1), Some(Label::from("s")))
+                                    )
+                                ])
+                            )
+                        )
+                    )
                 ),
                 Existential::from(StructureSig(HashMap::from_iter(vec![
                     (Label::from("t"), AtomicType(IType::Int, IKind::Mono)),
@@ -1446,105 +1370,45 @@ mod tests {
                 )
             ]),
             (
-                ITerm::app(
-                    ITerm::abs(
-                        IType::record(vec![(
-                            Label::from("t"),
-                            IType::forall(
-                                Some(IKind::fun(IMono, IMono)),
-                                IType::fun(
-                                    IType::app(IType::var(0), IType::Int),
-                                    IType::app(IType::var(0), IType::Int)
-                                )
-                            )
-                        )]),
-                        ITerm::app(
-                            ITerm::abs(
-                                IType::forall(
-                                    Some(IKind::fun(IMono, IMono)),
-                                    IType::fun(
-                                        IType::app(IType::var(0), IType::Int),
-                                        IType::app(IType::var(0), IType::Int)
-                                    )
-                                ),
-                                ITerm::app(
-                                    ITerm::abs(
-                                        IType::record(vec![(
-                                            Label::from("s"),
-                                            IType::forall(
-                                                Some(IKind::fun(IMono, IMono)),
-                                                IType::fun(
-                                                    IType::app(
-                                                        IType::var(0),
-                                                        IType::fun(IType::Int, IType::Int)
-                                                    ),
-                                                    IType::app(
-                                                        IType::var(0),
-                                                        IType::fun(IType::Int, IType::Int)
-                                                    )
-                                                )
-                                            )
-                                        )]),
-                                        ITerm::app(
-                                            ITerm::abs(
-                                                IType::forall(
-                                                    Some(IKind::fun(IMono, IMono)),
-                                                    IType::fun(
-                                                        IType::app(
-                                                            IType::var(0),
-                                                            IType::fun(IType::Int, IType::Int)
-                                                        ),
-                                                        IType::app(
-                                                            IType::var(0),
-                                                            IType::fun(IType::Int, IType::Int)
-                                                        )
-                                                    )
-                                                ),
-                                                ITerm::record(vec![
-                                                    (
-                                                        Label::from("t"),
-                                                        ITerm::proj(
-                                                            ITerm::var(3),
-                                                            Some(Label::from("t"))
-                                                        )
-                                                    ),
-                                                    (
-                                                        Label::from("s"),
-                                                        ITerm::proj(
-                                                            ITerm::var(1),
-                                                            Some(Label::from("s"))
-                                                        )
-                                                    )
-                                                ])
-                                            ),
-                                            ITerm::proj(ITerm::var(0), Some(Label::from("s")))
-                                        )
-                                    ),
-                                    ITerm::record(vec![(
-                                        Label::from("s"),
-                                        ITerm::poly(
-                                            vec![IKind::fun(IKind::Mono, IKind::Mono)],
-                                            ITerm::abs(
-                                                IType::app(
-                                                    IType::var(0),
-                                                    IType::fun(IType::Int, IType::Int)
-                                                ),
-                                                ITerm::var(0)
-                                            )
-                                        )
-                                    )])
-                                )
-                            ),
-                            ITerm::proj(ITerm::var(0), Some(Label::from("t")))
-                        )
-                    ),
+                ITerm::r#let(
                     ITerm::record(vec![(
                         Label::from("t"),
                         ITerm::poly(
                             vec![IKind::fun(IKind::Mono, IKind::Mono)],
                             ITerm::abs(IType::app(IType::var(0), IType::Int), ITerm::var(0))
                         )
-                    )])
+                    )]),
+                    ITerm::r#let(
+                        ITerm::proj(ITerm::var(0), Some(Label::from("t"))),
+                        ITerm::r#let(
+                            ITerm::record(vec![(
+                                Label::from("s"),
+                                ITerm::poly(
+                                    vec![IKind::fun(IKind::Mono, IKind::Mono)],
+                                    ITerm::abs(
+                                        IType::app(
+                                            IType::var(0),
+                                            IType::fun(IType::Int, IType::Int)
+                                        ),
+                                        ITerm::var(0)
+                                    )
+                                )
+                            )]),
+                            ITerm::r#let(
+                                ITerm::proj(ITerm::var(0), Some(Label::from("s"))),
+                                ITerm::record(vec![
+                                    (
+                                        Label::from("t"),
+                                        ITerm::proj(ITerm::var(3), Some(Label::from("t")))
+                                    ),
+                                    (
+                                        Label::from("s"),
+                                        ITerm::proj(ITerm::var(1), Some(Label::from("s")))
+                                    )
+                                ])
+                            )
+                        )
+                    )
                 ),
                 Existential::from(StructureSig(HashMap::from_iter(vec![
                     (Label::from("t"), AtomicType(IType::Int, IKind::Mono)),
@@ -1566,47 +1430,29 @@ mod tests {
                 Module(id("N"), Seal(id("M"), Sig::Seq(vec![])))
             ]),
             (
-                ITerm::app(
-                    ITerm::abs(
-                        IType::record(Some((l("M"), IType::record(None)))),
-                        ITerm::app(
-                            ITerm::abs(
-                                IType::record(None),
-                                ITerm::app(
-                                    ITerm::abs(
-                                        IType::record(Some((l("N"), IType::record(None)))),
-                                        ITerm::app(
-                                            ITerm::abs(
-                                                IType::record(None),
-                                                ITerm::record(vec![
-                                                    (l("M"), proj(ITerm::var(3), l("M"))),
-                                                    (l("N"), proj(ITerm::var(1), l("N"))),
-                                                ])
-                                            ),
-                                            proj(ITerm::var(0), l("N"))
-                                        )
-                                    ),
-                                    ITerm::app(
-                                        ITerm::abs(
-                                            IType::record(None),
-                                            ITerm::record(Some((l("N"), ITerm::var(0))))
-                                        ),
-                                        ITerm::app(
-                                            ITerm::abs(IType::record(None), ITerm::record(None)),
-                                            ITerm::var(0)
-                                        )
-                                    )
-                                )
-                            ),
-                            proj(ITerm::var(0), l("M"))
-                        )
+                ITerm::r#let(
+                    ITerm::r#let(
+                        ITerm::record(None),
+                        ITerm::record(Some((l("M"), ITerm::var(0))))
                     ),
-                    ITerm::app(
-                        ITerm::abs(
-                            IType::record(None),
-                            ITerm::record(Some((l("M"), ITerm::var(0))))
-                        ),
-                        ITerm::record(None)
+                    ITerm::r#let(
+                        proj(ITerm::var(0), l("M")),
+                        ITerm::r#let(
+                            ITerm::r#let(
+                                ITerm::app(
+                                    ITerm::abs(IType::record(None), ITerm::record(None)),
+                                    ITerm::var(0)
+                                ),
+                                ITerm::record(Some((l("N"), ITerm::var(0))))
+                            ),
+                            ITerm::r#let(
+                                proj(ITerm::var(0), l("N")),
+                                ITerm::record(vec![
+                                    (l("M"), proj(ITerm::var(3), l("M"))),
+                                    (l("N"), proj(ITerm::var(1), l("N"))),
+                                ])
+                            )
+                        )
                     )
                 ),
                 Existential::from(SemanticSig::structure_sig(vec![

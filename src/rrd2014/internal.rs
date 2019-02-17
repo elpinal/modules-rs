@@ -1043,41 +1043,38 @@ impl Term {
     /// assert_eq!(Term::let_in(None, Int(0)), Int(0));
     ///
     /// assert_eq!(
-    ///     Term::let_in(vec![(Int(12), Type::Int)], Int(0)),
-    ///     Term::app(Term::Abs(Type::Int, Box::new(Int(0))), Int(12))
+    ///     Term::let_in(vec![Int(12)], Int(0)),
+    ///     Term::Let(Box::new(Int(12)), Box::new(Int(0)))
     /// );
     ///
     /// assert_eq!(
     ///     Term::let_in(
-    ///         vec![(Int(12), Type::Int), (Int(36), Type::fun(Type::Int, Type::Int))],
+    ///         vec![Int(12), Int(36)],
     ///         Int(0)
     ///     ),
-    ///     Term::app(
-    ///         Term::app(
-    ///             Term::Abs(
-    ///                 Type::Int,
-    ///                 Box::new(Term::Abs(Type::fun(Type::Int, Type::Int), Box::new(Int(0))))
-    ///             ),
-    ///             Int(12)
-    ///         ),
-    ///         Int(36)
+    ///     Term::Let(
+    ///         Box::new(Int(12)),
+    ///         Box::new(
+    ///             Term::Let(
+    ///                 Box::new(Int(36)),
+    ///                 Box::new(Int(0)),
+    ///             )
+    ///         )
     ///     )
     /// );
     /// ```
     pub fn let_in<I>(bs: I, t: Term) -> Self
     where
-        I: IntoIterator<Item = (Term, Type)>,
+        I: IntoIterator<Item = Term>,
         I::IntoIter: DoubleEndedIterator,
     {
-        let mut t0 = t;
-        let mut v = vec![];
-        for (t, ty) in bs.into_iter().rev() {
-            t0 = Term::Abs(ty, Box::new(t0));
-            v.push(t);
-        }
-        v.into_iter().rfold(t0, Term::app)
+        bs.into_iter()
+            .rfold(t, |acc, t0| Term::Let(Box::new(t0), Box::new(acc)))
     }
 
+    pub fn r#let(t0: Term, t: Term) -> Self {
+        Term::let_in(Some(t0), t)
+    }
     /// Creates an n-ary pack.
     ///
     /// # Examples
@@ -1241,7 +1238,8 @@ impl Term {
     ///         )
     ///     )
     /// );
-    pub fn unpack(t1: Term, n: usize, ty: Type, t2: Term) -> Self {
+    pub fn unpack(t1: Term, n: usize, _ty: Type, t2: Term) -> Self {
+        // TODO: remove parameter `_ty`.
         let mut t = t2;
         for _ in 1..n {
             t = Term::Unpack(Box::new(Term::var(0)), Box::new(t));
@@ -1249,7 +1247,7 @@ impl Term {
         if 0 < n {
             Term::Unpack(Box::new(t1), Box::new(t))
         } else {
-            Term::let_in(Some((t1, ty)), t)
+            Term::let_in(Some(t1), t)
         }
     }
 
