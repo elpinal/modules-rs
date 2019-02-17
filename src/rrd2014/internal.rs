@@ -16,9 +16,6 @@ pub struct Name(String);
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Label {
     Label(Name),
-    Val,
-    Typ,
-    Sig,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -138,7 +135,7 @@ pub enum TypeError {
     KindError(KindError),
 
     #[fail(display = "in application of {:?} to {:?}: {}", _0, _1, _2)]
-    Application(Term, Term, Box<TypeError>),
+    Application(Box<Term>, Box<Term>, Box<TypeError>),
 }
 
 #[derive(Clone, Default)]
@@ -342,23 +339,20 @@ impl From<super::SemanticSig> for Type {
     fn from(st: super::SemanticSig) -> Self {
         use super::SemanticSig::*;
         match st {
-            AtomicTerm(ty) => Type::record(vec![(Label::Val, ty)]),
+            AtomicTerm(ty) => ty,
             AtomicType(mut ty, k) => {
                 ty.shift(1);
-                Type::record(vec![(
-                    Label::Typ,
-                    Type::forall(
-                        vec![Kind::fun(k, Kind::Mono)],
-                        Type::fun(
-                            Type::app(Type::var(0), ty.clone()),
-                            Type::app(Type::var(0), ty),
-                        ),
+                Type::forall(
+                    vec![Kind::fun(k, Kind::Mono)],
+                    Type::fun(
+                        Type::app(Type::var(0), ty.clone()),
+                        Type::app(Type::var(0), ty),
                     ),
-                )])
+                )
             }
             AtomicSig(asig) => {
                 let ty = Type::from(asig);
-                Type::record(vec![(Label::Sig, Type::fun(ty.clone(), ty))])
+                Type::fun(ty.clone(), ty)
             }
             StructureSig(m) => Type::Record(
                 m.into_iter()
@@ -404,21 +398,15 @@ impl From<super::SemanticTerm> for Term {
     fn from(st: super::SemanticTerm) -> Self {
         use super::SemanticTerm as ST;
         match st {
-            ST::Term(t) => Term::record(vec![(Label::Val, t)]),
+            ST::Term(t) => t,
             ST::Type(mut ty, k) => {
                 ty.shift(1);
-                Term::record(vec![(
-                    Label::Typ,
-                    Term::poly(
-                        vec![Kind::fun(k, Kind::Mono)],
-                        Term::abs(Type::app(Type::var(0), ty), Term::var(0)),
-                    ),
-                )])
+                Term::poly(
+                    vec![Kind::fun(k, Kind::Mono)],
+                    Term::abs(Type::app(Type::var(0), ty), Term::var(0)),
+                )
             }
-            ST::Sig(asig) => Term::record(vec![(
-                Label::Sig,
-                Term::abs(Type::from(asig), Term::var(0)),
-            )]),
+            ST::Sig(asig) => Term::abs(Type::from(asig), Term::var(0)),
         }
     }
 }
@@ -472,12 +460,11 @@ impl<'a> From<&'a super::Ident> for &'a Name {
 }
 
 impl TryFrom<Label> for Name {
-    type Error = String;
+    type Error = !;
 
     fn try_from(l: Label) -> Result<Self, Self::Error> {
         match l {
             Label::Label(name) => Ok(name),
-            _ => Err(format!("could not convert to name: {:?}", l)),
         }
     }
 }
@@ -901,8 +888,8 @@ impl Term {
     /// );
     ///
     /// assert_eq!(
-    ///     Term::proj(Term::var(800), vec![Label::Sig, Label::from("u")]),
-    ///     Term::Proj(Box::new(Term::Proj(Box::new(Term::var(800)), Label::Sig)), Label::from("u"))
+    ///     Term::proj(Term::var(800), vec![Label::from("q"), Label::from("u")]),
+    ///     Term::Proj(Box::new(Term::Proj(Box::new(Term::var(800)), Label::from("q"))), Label::from("u"))
     /// );
     /// ```
     pub fn proj<I>(t: Term, ls: I) -> Self
@@ -1217,8 +1204,8 @@ impl Term {
                 match ty1 {
                     Type::Fun(ty11, ty12) if ty11.equal(&ty2) => Ok(*ty12),
                     Type::Fun(ty11, _) => Err(TypeError::Application(
-                        *t1.clone(),
-                        *t2.clone(),
+                        t1.clone(),
+                        t2.clone(),
                         Box::new(TypeError::TypeMismatch(*ty11, ty2)),
                     )),
                     _ => Err(TypeError::NotFunction(ty1)),
@@ -1920,9 +1907,8 @@ mod tests {
     }
 
     macro_rules! assert_encoding {
-        ($s:expr, $l:expr, $x:expr) => {{
-            use self::Record as R;
-            assert_eq!(Type::from($s), Record(R::from_iter(vec![($l, $x)])));
+        ($s:expr, $x:expr) => {{
+            assert_eq!(Type::from($s), $x);
         }};
     }
 
@@ -1932,12 +1918,11 @@ mod tests {
         use Kind::*;
         use Type::*;
 
-        assert_encoding!(AtomicTerm(Int), Label::Val, Int);
-        assert_encoding!(AtomicTerm(Type::var(0)), Label::Val, Type::var(0));
+        assert_encoding!(AtomicTerm(Int), Int);
+        assert_encoding!(AtomicTerm(Type::var(0)), Type::var(0));
 
         assert_encoding!(
             AtomicType(Int, Mono),
-            Label::Typ,
             Type::forall(
                 vec![Kind::fun(Mono, Mono)],
                 Type::fun(Type::app(Type::var(0), Int), Type::app(Type::var(0), Int))
@@ -1946,7 +1931,6 @@ mod tests {
 
         assert_encoding!(
             AtomicType(Type::var(0), Mono),
-            Label::Typ,
             Type::forall(
                 vec![Kind::fun(Mono, Mono)],
                 Type::fun(
