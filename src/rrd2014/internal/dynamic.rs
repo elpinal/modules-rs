@@ -116,6 +116,13 @@ impl DynEnv {
                 v => bail!("not package: {:?}", v),
             },
             Int(n) => Ok(Value::Int(n)),
+            Let(t1, t2) => {
+                let v = self.reduce(*t1)?;
+                self.insert(v);
+                let v = self.reduce(*t2)?;
+                self.drop();
+                Ok(v)
+            }
         }
     }
 }

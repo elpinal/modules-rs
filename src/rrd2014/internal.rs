@@ -78,6 +78,10 @@ pub enum Term {
     Unpack(Box<Term>, Box<Term>),
 
     Int(isize),
+
+    /// Just a syntax sugar for `App(Abs(ty, t2), t1)`, but convenient for debugging and it reduces
+    /// the size of terms.
+    Let(Box<Term>, Box<Term>),
 }
 
 #[derive(Debug, PartialEq)]
@@ -336,8 +340,13 @@ impl Substitution for Term {
                 ty2.apply(s);
             }
             Unpack(ref mut t1, ref mut t2) => {
-                let s = &s.clone().shift(1);
                 t1.apply(s);
+                let s = &s.clone().shift(1);
+                t2.apply(s);
+            }
+            Let(ref mut t1, ref mut t2) => {
+                t1.apply(s);
+                let s = &s.clone().shift(1);
                 t2.apply(s);
             }
         }
@@ -1341,6 +1350,13 @@ impl Term {
                 ty1 => Err(TypeError::NotSome(ty1)),
             },
             Int(_) => Ok(Type::Int),
+            Let(ref t1, ref t2) => {
+                let ty1 = t1.type_of(ctx)?;
+                ctx.insert_value(Cow::Owned(ty1));
+                let ty2 = t2.type_of(ctx)?;
+                ctx.drop_value();
+                Ok(ty2)
+            }
         }
     }
 }
