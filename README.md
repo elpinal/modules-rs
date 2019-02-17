@@ -5,7 +5,7 @@ This repository contains an implementation of F-ing modules in Rust.
 ## See also
 
 - [elpinal/modules](https://github.com/elpinal/modules)
-contains the previous implementation of F-ing modules in Haskell.
+contains my previous implementation of F-ing modules in Haskell.
 
 ## Reference
 
