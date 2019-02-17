@@ -82,6 +82,9 @@ pub struct Env<T, S> {
 
     /// A name-to-index map.
     nmap: HashMap<Name, usize>,
+
+    /// A counter.
+    n: usize,
 }
 
 pub struct EnvState(HashMap<Name, usize>);
@@ -153,6 +156,7 @@ impl<T, S> Default for Env<T, S> {
             tenv: vec![],
             venv: vec![],
             nmap: HashMap::new(),
+            n: 0,
         }
     }
 }
@@ -1568,6 +1572,7 @@ impl<'a, S: Clone + Default> From<Context<'a>> for Env<Type, S> {
                 .map(|ty| Some(ty.into_owned()))
                 .collect(),
             nmap: HashMap::new(),
+            n: 0, // TODO: Is this correct?
         }
     }
 }
@@ -1827,7 +1832,7 @@ mod tests {
                 .into_iter()
                 .map(Some)
                 .collect(),
-            nmap: HashMap::new(),
+            ..Default::default()
         };
 
         assert_eq!(
@@ -1873,7 +1878,7 @@ mod tests {
         let mut env = Env {
             tenv: vec![(Mono, "N.t")],
             venv: vec![Type::var(0)].into_iter().map(Some).collect(),
-            nmap: HashMap::new(),
+            ..Default::default()
         };
         env.insert_type(Mono, "P.t");
         assert_eq!(
@@ -1881,7 +1886,7 @@ mod tests {
             Env {
                 tenv: vec![(Mono, "N.t"), (Mono, "P.t")],
                 venv: vec![Type::var(1)].into_iter().map(Some).collect(),
-                nmap: HashMap::new(),
+                ..Default::default()
             }
         );
     }
@@ -1894,7 +1899,7 @@ mod tests {
         let mut env = Env {
             tenv: vec![(Mono, "t")],
             venv: vec![],
-            nmap: HashMap::new(),
+            ..Default::default()
         };
 
         env.insert_value(Name::from("x"), Int);
