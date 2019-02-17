@@ -1,6 +1,6 @@
 # Modules
 
-This repository contains an implementation of F-ing modules in Rust.
+This repository contains an interpreter of F-ing modules in Rust.
 
 ## See also
 
