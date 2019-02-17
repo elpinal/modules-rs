@@ -125,6 +125,13 @@ enum SemanticTerm {
     Sig(AbstractSig),
 }
 
+struct BindingInformation {
+    t: ITerm,
+    n: usize,
+    ty: IType,
+    w: Vec<(ITerm, IType)>,
+}
+
 type Env = internal::Env<SemanticSig, Option<StemFrom>>;
 
 #[derive(Debug, Fail, PartialEq)]
@@ -270,6 +277,15 @@ impl Substitution for SemanticSig {
 impl<T: Substitution> Substitution for Box<T> {
     fn apply(&mut self, s: &Subst) {
         (**self).apply(s);
+    }
+}
+
+impl Substitution for BindingInformation {
+    fn apply(&mut self, s: &Subst) {
+        // This is not verified to be correct.
+        self.t.apply(s);
+        self.ty.apply(s);
+        self.w.apply(s);
     }
 }
 
@@ -621,6 +637,7 @@ impl Elaboration for Module {
                     n += 1;
                     let n0 = n;
                     body.apply(&s);
+                    v.apply(&s);
                     env.insert_types(ex.0.qs.clone().into_iter().map(|(k, s)| (k, Some(s))));
                     env.insert_dummy_value();
                     qs.extend(ex.0.qs.clone());
@@ -635,12 +652,12 @@ impl Elaboration for Module {
                         n += 1;
                         env.insert_value(Name::try_from(l.clone()).unwrap(), ssig.clone());
                     }
-                    v.push((
+                    v.push(BindingInformation {
                         t,
-                        ex.0.qs.len(),
-                        IType::from(ex.map(SemanticSig::StructureSig)),
+                        n: ex.0.qs.len(),
+                        ty: IType::from(ex.map(SemanticSig::StructureSig)),
                         w,
-                    ));
+                    });
                 }
                 env.drop_values_state(n, enter_state);
                 env.drop_types(qs.len());
@@ -654,7 +671,9 @@ impl Elaboration for Module {
                         qs.iter().map(|p| p.0.clone()),
                         SemanticSig::StructureSig(body.clone()).into(),
                     ),
-                    |t0, (t, n, ty, w)| ITerm::unpack(t, n, ty, ITerm::let_in(w, t0)),
+                    |t0, BindingInformation { t, n, ty, w }| {
+                        ITerm::unpack(t, n, ty, ITerm::let_in(w, t0))
+                    },
                 );
                 Ok((
                     t,

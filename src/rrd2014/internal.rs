@@ -222,7 +222,7 @@ impl<T: Substitution> Substitution for Vec<T> {
     }
 }
 
-impl<T: Substitution> Substitution for (T, T) {
+impl<S: Substitution, T: Substitution> Substitution for (S, T) {
     fn apply(&mut self, s: &Subst) {
         self.0.apply(s);
         self.1.apply(s);
