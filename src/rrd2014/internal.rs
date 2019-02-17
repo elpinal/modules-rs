@@ -21,7 +21,12 @@ pub enum Label {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct Variable(usize);
+pub enum Variable {
+    Variable(usize),
+    Generated(usize),
+}
+
+use Variable::Variable as V;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Record<T>(HashMap<Label, T>);
@@ -77,10 +82,14 @@ pub enum Term {
 
 #[derive(Debug, PartialEq)]
 pub struct Env<T, S> {
+    /// A type environment.
+    /// Variable 0 denotes the last introduced type variable.
     tenv: Vec<(Kind, S)>,
+
     venv: Vec<Option<T>>,
 
     /// A type environment for generated variables.
+    /// Variable 0 denotes the first introduced type variable.
     gtenv: Vec<Kind>,
 
     /// A name-to-index map.
@@ -175,11 +184,11 @@ pub trait Shift {
 
 impl Shift for Type {
     fn shift_above(&mut self, c: usize, d: isize) {
-        let f = |c0, v: Variable| {
-            if c0 <= v.0 {
-                Type::Var(v.add(d))
+        let f = |c0, v: usize| {
+            if c0 <= v {
+                Type::Var(V(v).add(d))
             } else {
-                Type::Var(v)
+                Type::Var(V(v))
             }
         };
         self.map(&f, c)
@@ -498,14 +507,22 @@ impl Name {
 
 impl Variable {
     pub fn new(n: usize) -> Self {
-        Variable(n)
+        V(n)
     }
 
     fn add(self, d: isize) -> Self {
-        Variable(
-            usize::try_from(isize::try_from(self.0).unwrap() + d)
-                .unwrap_or_else(|_| panic!("negative index: {:?} and {}", self, d)),
-        )
+        match self {
+            Variable::Generated(_) => self,
+            V(n) => V(usize::try_from(isize::try_from(n).unwrap() + d)
+                .unwrap_or_else(|_| panic!("negative index: {} and {}", n, d))),
+        }
+    }
+
+    fn get_index(self) -> usize {
+        match self {
+            V(n) => n,
+            Variable::Generated(n) => panic!("get_index: unexpected generated variable: {}", n),
+        }
     }
 }
 
@@ -524,7 +541,7 @@ impl<T> FromIterator<(Label, T)> for Record<T> {
 impl Record<Type> {
     fn map<F>(&mut self, f: &F, c: usize)
     where
-        F: Fn(usize, Variable) -> Type,
+        F: Fn(usize, usize) -> Type,
     {
         self.0.values_mut().for_each(|ty| ty.map(f, c));
     }
@@ -565,7 +582,11 @@ impl Kind {
 
 impl Type {
     pub fn var(n: usize) -> Self {
-        Type::Var(Variable(n))
+        Type::Var(V(n))
+    }
+
+    pub fn generated_var(n: usize) -> Self {
+        Type::Var(Variable::Generated(n))
     }
 
     pub fn fun(ty1: Type, ty2: Type) -> Self {
@@ -682,14 +703,17 @@ impl Type {
 
     fn map<F>(&mut self, f: &F, c: usize)
     where
-        F: Fn(usize, Variable) -> Type,
+        F: Fn(usize, usize) -> Type,
     {
         use Type::*;
         match *self {
-            Var(v) => {
-                let ty = f(c, v);
-                *self = ty;
-            }
+            Var(v) => match v {
+                V(v) => {
+                    let ty = f(c, v);
+                    *self = ty;
+                }
+                Variable::Generated(_) => (),
+            },
             Fun(ref mut ty1, ref mut ty2) => {
                 ty1.map(f, c);
                 ty2.map(f, c);
@@ -716,13 +740,13 @@ impl Type {
     }
 
     fn subst(&mut self, j: usize, ty: &Type) {
-        let f = |c: usize, v: Variable| {
-            if c + j == v.0 {
+        let f = |c: usize, v: usize| {
+            if c + j == v {
                 let mut ty = ty.clone();
                 ty.shift(isize::try_from(c).unwrap());
                 ty
             } else {
-                Type::Var(v)
+                Type::Var(V(v))
             }
         };
         self.map(&f, 0)
@@ -735,13 +759,13 @@ impl Type {
     }
 
     fn subst_shift(&mut self, j: usize, ty: &Type, d: isize) {
-        let f = |c: usize, v: Variable| {
-            if c + j == v.0 {
+        let f = |c: usize, v: usize| {
+            if c + j == v {
                 let mut ty = ty.clone();
                 ty.shift(isize::try_from(c).unwrap() + d);
                 ty
             } else {
-                Type::Var(v)
+                Type::Var(V(v))
             }
         };
         self.map(&f, 0)
@@ -784,7 +808,7 @@ impl Type {
             Forall(k, ty) => Type::forall(vec![k], ty.reduce()),
             Some(k, ty) => Type::some(vec![k], ty.reduce()),
             Abs(k, ty) => match ty.reduce() {
-                App(mut ty1, ty2) if *ty2 == Var(Variable(0)) && ty1.eta_reducible(0) => {
+                App(mut ty1, ty2) if *ty2 == Type::var(0) && ty1.eta_reducible(0) => {
                     ty1.shift(-1);
                     *ty1
                 }
@@ -809,7 +833,8 @@ impl Type {
     fn eta_reducible(&self, n: usize) -> bool {
         use Type::*;
         match *self {
-            Var(v) => v.0 != n,
+            Var(V(m)) => m != n,
+            Var(Variable::Generated(_)) => true,
             Fun(ref ty1, ref ty2) => ty1.eta_reducible(n) && ty2.eta_reducible(n),
             Record(ref r) => r.0.values().all(|ty| ty.eta_reducible(n)),
             Forall(ref k, ref ty) => k.eta_reducible(n + 1) && ty.eta_reducible(n + 1),
@@ -879,7 +904,7 @@ impl Type {
 
 impl Term {
     pub fn var(n: usize) -> Self {
-        Term::Var(Variable(n))
+        Term::Var(V(n))
     }
 
     pub fn abs(ty: Type, t: Term) -> Self {
@@ -1344,24 +1369,34 @@ pub enum UnificationError {
 impl<T, S> Env<T, S> {
     pub fn lookup_type(&self, v: Variable) -> Result<(Kind, S), EnvError>
     where
-        S: Clone,
+        S: Clone + Default,
     {
-        self.tenv
-            .iter()
-            .rev()
-            .nth(v.0)
-            .cloned()
-            .ok_or_else(|| EnvError::UnboundTypeVariable(v))
+        match v {
+            V(n) => self
+                .tenv
+                .iter()
+                .rev()
+                .nth(n)
+                .cloned()
+                .ok_or_else(|| EnvError::UnboundTypeVariable(v)),
+            Variable::Generated(n) => self
+                .gtenv
+                .get(n)
+                .cloned()
+                .map(|k| (k, S::default()))
+                .ok_or_else(|| EnvError::UnboundTypeVariable(v)),
+        }
     }
 
     pub fn lookup_value(&self, v: Variable) -> Result<T, EnvError>
     where
         T: Clone,
     {
+        let n = v.get_index();
         self.venv
             .iter()
             .rev()
-            .nth(v.0)
+            .nth(n)
             .cloned()
             .ok_or_else(|| EnvError::UnboundVariable(v))?
             .ok_or_else(|| EnvError::UnboundVariable(v))
@@ -1381,7 +1416,7 @@ impl<T, S> Env<T, S> {
                 .expect("lookup_value_by_name: unexpected None")
                 .clone()
                 .expect("lookup_value_by_name: unexpected None"),
-            Variable(self.venv.len() - n - 1),
+            V(self.venv.len() - n - 1),
         ))
     }
 
@@ -1483,12 +1518,14 @@ impl<T, S> Env<T, S> {
         }
     }
 
-    pub fn fresh_type_variable(&mut self, k: Kind, x: S) -> Variable
+    pub fn fresh_type_variable(&mut self, k: Kind) -> Variable
     where
         T: Shift,
     {
-        self.insert_type(k, x);
-        Variable(0)
+        self.gtenv.push(k);
+        let n = self.n;
+        self.n += 1;
+        Variable::Generated(n)
     }
 }
 
@@ -1510,20 +1547,11 @@ impl Subst {
 }
 
 impl<'a> Context<'a> {
-    fn lookup_type(&self, v: Variable) -> Result<Cow<Kind>, EnvError> {
-        self.tenv
-            .iter()
-            .rev()
-            .nth(v.0)
-            .cloned()
-            .ok_or_else(|| EnvError::UnboundTypeVariable(v))
-    }
-
     fn lookup_value(&self, v: Variable) -> Result<Cow<Type>, EnvError> {
         self.venv
             .iter()
             .rev()
-            .nth(v.0)
+            .nth(v.get_index())
             .cloned()
             .ok_or_else(|| EnvError::UnboundVariable(v))
     }
@@ -1829,40 +1857,31 @@ mod tests {
             ..Default::default()
         };
 
-        assert_eq!(
-            env.lookup_type(Variable(0)),
-            Ok((Kind::fun(Mono, Mono), "M.s"))
-        );
-        assert_eq!(env.lookup_type(Variable(1)), Ok((Mono, "M.t")));
+        assert_eq!(env.lookup_type(V(0)), Ok((Kind::fun(Mono, Mono), "M.s")));
+        assert_eq!(env.lookup_type(V(1)), Ok((Mono, "M.t")));
 
-        assert_eq!(env.lookup_value(Variable(0)), Ok(Type::var(6)));
-        assert_eq!(env.lookup_value(Variable(1)), Ok(Type::var(3)));
+        assert_eq!(env.lookup_value(V(0)), Ok(Type::var(6)));
+        assert_eq!(env.lookup_value(V(1)), Ok(Type::var(3)));
 
         let mut env = env;
         env.insert_type(Kind::fun(Mono, Kind::fun(Mono, Mono)), "M.u");
 
         assert_eq!(
-            env.lookup_type(Variable(0)),
+            env.lookup_type(V(0)),
             Ok((Kind::fun(Mono, Kind::fun(Mono, Mono)), "M.u"))
         );
-        assert_eq!(
-            env.lookup_type(Variable(1)),
-            Ok((Kind::fun(Mono, Mono), "M.s"))
-        );
-        assert_eq!(env.lookup_type(Variable(2)), Ok((Mono, "M.t")));
+        assert_eq!(env.lookup_type(V(1)), Ok((Kind::fun(Mono, Mono), "M.s")));
+        assert_eq!(env.lookup_type(V(2)), Ok((Mono, "M.t")));
 
         assert_eq!(
-            env.lookup_type(Variable(3)),
-            Err(EnvError::UnboundTypeVariable(Variable(3)))
+            env.lookup_type(V(3)),
+            Err(EnvError::UnboundTypeVariable(V(3)))
         );
 
-        assert_eq!(env.lookup_value(Variable(0)), Ok(Type::var(7)));
-        assert_eq!(env.lookup_value(Variable(1)), Ok(Type::var(4)));
+        assert_eq!(env.lookup_value(V(0)), Ok(Type::var(7)));
+        assert_eq!(env.lookup_value(V(1)), Ok(Type::var(4)));
 
-        assert_eq!(
-            env.lookup_value(Variable(2)),
-            Err(EnvError::UnboundVariable(Variable(2)))
-        );
+        assert_eq!(env.lookup_value(V(2)), Err(EnvError::UnboundVariable(V(2))));
     }
 
     #[test]
@@ -1897,29 +1916,23 @@ mod tests {
         };
 
         env.insert_value(Name::from("x"), Int);
-        assert_eq!(
-            env.lookup_value_by_name(&Name::from("x")),
-            Ok((Int, Variable(0)))
-        );
+        assert_eq!(env.lookup_value_by_name(&Name::from("x")), Ok((Int, V(0))));
 
         env.insert_value(Name::from("y"), Type::fun(Int, Int));
-        assert_eq!(
-            env.lookup_value_by_name(&Name::from("x")),
-            Ok((Int, Variable(1)))
-        );
+        assert_eq!(env.lookup_value_by_name(&Name::from("x")), Ok((Int, V(1))));
         assert_eq!(
             env.lookup_value_by_name(&Name::from("y")),
-            Ok((Type::fun(Int, Int), Variable(0)))
+            Ok((Type::fun(Int, Int), V(0)))
         );
 
         env.insert_value(Name::from("x"), Type::fun(Int, Type::var(0)));
         assert_eq!(
             env.lookup_value_by_name(&Name::from("x")),
-            Ok((Type::fun(Int, Type::var(0)), Variable(0)))
+            Ok((Type::fun(Int, Type::var(0)), V(0)))
         );
         assert_eq!(
             env.lookup_value_by_name(&Name::from("y")),
-            Ok((Type::fun(Int, Int), Variable(1)))
+            Ok((Type::fun(Int, Int), V(1)))
         );
     }
 
@@ -2011,7 +2024,7 @@ mod tests {
 
         assert_kinding_err!(
             Type::var(0),
-            KindError::Env(EnvError::UnboundTypeVariable(Variable(0)))
+            KindError::Env(EnvError::UnboundTypeVariable(V(0)))
         );
         assert_kinding_err!(
             Type::fun(Int, Type::abs(vec![Mono], Int)),
@@ -2068,10 +2081,9 @@ mod tests {
                 Type::fun(Type::var(0), Type::var(0)),
                 Type::fun(Type::Int, Type::var(1))
             )]),
-            Ok(Subst::from_iter(vec![
-                (Variable(0), Type::Int),
-                (Variable(1), Type::Int),
-            ]))
+            Ok(Subst::from_iter(
+                vec![(V(0), Type::Int), (V(1), Type::Int),]
+            ))
         );
     }
 }

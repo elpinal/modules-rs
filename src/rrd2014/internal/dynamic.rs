@@ -52,7 +52,7 @@ impl DynEnv {
     }
 
     fn get(&self, v: Variable) -> Option<&Value> {
-        self.vs.iter().rev().nth(v.0)
+        self.vs.iter().rev().nth(v.get_index())
     }
 
     fn drop(&mut self) {

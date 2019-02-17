@@ -955,7 +955,7 @@ impl Expr {
         use IKind::*;
         match *self {
             Abs(ref id, ref e) => {
-                let v = env.fresh_type_variable(Mono, None);
+                let v = env.fresh_type_variable(Mono);
                 let mut ty0 = IType::Var(v);
                 let name = Name::from(id.clone());
                 let enter_state = env.get_state();
@@ -974,7 +974,7 @@ impl Expr {
                 let (t2, ty2, s2) = e2.infer(env)?;
                 t1.apply(&s2);
                 ty1.apply(&s2);
-                let mut v = IType::Var(env.fresh_type_variable(Mono, None));
+                let mut v = IType::Var(env.fresh_type_variable(Mono));
                 let s3 = env
                     .unify(vec![(ty1, IType::fun(ty2, v.clone()))])
                     .map_err(|e| TypeError::Unification(self.clone(), e))?;
@@ -1158,8 +1158,8 @@ mod tests {
         assert_elaborate_ok_2!(
             Expr::abs(Ident::from("x"), Int(55)),
             (
-                ITerm::abs(IType::var(0), ITerm::Int(55)),
-                IType::fun(IType::var(0), IType::Int)
+                ITerm::abs(IType::generated_var(0), ITerm::Int(55)),
+                IType::fun(IType::generated_var(0), IType::Int)
             )
         );
 
@@ -1175,7 +1175,10 @@ mod tests {
             Expr::app(Int(45), Int(98)),
             TypeError::Unification(
                 Expr::app(Int(45), Int(98)),
-                UnificationError::NotUnifiable(IType::Int, IType::fun(IType::Int, IType::var(0)))
+                UnificationError::NotUnifiable(
+                    IType::Int,
+                    IType::fun(IType::Int, IType::generated_var(0))
+                )
             )
         );
 
@@ -1191,10 +1194,13 @@ mod tests {
             ),
             (
                 ITerm::abs(
-                    IType::var(0),
-                    ITerm::app(ITerm::abs(IType::var(0), ITerm::var(0)), ITerm::var(0)),
+                    IType::generated_var(0),
+                    ITerm::app(
+                        ITerm::abs(IType::generated_var(0), ITerm::var(0)),
+                        ITerm::var(0)
+                    ),
                 ),
-                IType::fun(IType::var(0), IType::var(0))
+                IType::fun(IType::generated_var(0), IType::generated_var(0))
             )
         );
     }
@@ -1221,11 +1227,11 @@ mod tests {
             (
                 ITerm::record(vec![(
                     Label::from("x"),
-                    ITerm::abs(IType::var(0), ITerm::Int(22))
+                    ITerm::abs(IType::generated_var(0), ITerm::Int(22))
                 )]),
                 Existential::from(HashMap::from_iter(vec![(
                     Label::from("x"),
-                    AtomicTerm(IType::fun(IType::var(0), IType::Int))
+                    AtomicTerm(IType::fun(IType::generated_var(0), IType::Int))
                 )]))
             )
         );
