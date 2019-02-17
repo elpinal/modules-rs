@@ -72,8 +72,13 @@ fn run(opt: Opt) -> Result<(), Error> {
         },
         Opt::TypecheckInternal { file } => match elaborate(parse(file)?)? {
             (t, asig) => {
-                let ty = internal::typecheck(&t)
-                    .with_context(|e| format!("internal type error: {}", e))?;
+                let ty = internal::typecheck(&t).with_context(|e| {
+                    format!(
+                        "{}:\n{}",
+                        "[unsound] internal type error".bright_red().bold(),
+                        e
+                    )
+                })?;
                 let expect = asig.into();
                 if ty.equal(&expect) {
                     println!("{}", "The translation is sound.".bright_green().bold());
