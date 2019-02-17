@@ -463,8 +463,7 @@ impl Elaboration for Expr {
     type Error = TypeError;
 
     fn elaborate(&self, env: &mut Env) -> Result<Self::Output, Self::Error> {
-        let (t, ty, s) = self.infer(env)?;
-        Ok((t, ty, s))
+        self.infer(env)
     }
 }
 
@@ -959,9 +958,10 @@ impl Expr {
                 let v = env.fresh_type_variable(Mono, None);
                 let mut ty0 = IType::Var(v);
                 let name = Name::from(id.clone());
-                let prev = env.insert_value(name.clone(), SemanticSig::AtomicTerm(ty0.clone()));
+                let enter_state = env.get_state();
+                env.insert_value(name.clone(), SemanticSig::AtomicTerm(ty0.clone()));
                 let (t, ty, s) = e.infer(env)?;
-                env.drop_value(name, prev);
+                env.drop_values_state(1, enter_state);
                 ty0.apply(&s);
                 Ok((
                     ITerm::abs(SemanticSig::AtomicTerm(ty0.clone()).into(), t),
