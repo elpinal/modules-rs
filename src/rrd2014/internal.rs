@@ -138,7 +138,7 @@ pub enum TypeError {
     Application(Box<Term>, Box<Term>, Box<TypeError>),
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Subst(HashMap<Variable, Type>);
 
 pub trait Substitution {
@@ -229,9 +229,15 @@ impl<T: Substitution> Substitution for (T, T) {
     }
 }
 
+impl<K: Eq + Hash, T: Substitution, S: BuildHasher> Substitution for HashMap<K, T, S> {
+    fn apply(&mut self, s: &Subst) {
+        self.values_mut().for_each(|x| x.apply(s));
+    }
+}
+
 impl<T: Substitution> Substitution for Record<T> {
     fn apply(&mut self, s: &Subst) {
-        self.0.values_mut().for_each(|x| x.apply(s));
+        self.0.apply(s)
     }
 }
 
@@ -1478,8 +1484,8 @@ impl<T, S> Env<T, S> {
 }
 
 impl Subst {
-    pub fn compose(mut self, mut s: Subst) -> Self {
-        s.apply(&self);
+    pub fn compose(mut self, s: Subst) -> Self {
+        self.apply(&s);
         self.0.extend(s.0);
         self
     }
@@ -2040,6 +2046,21 @@ mod tests {
         assert_kinding_err!(
             Type::app(Type::abs(vec![Kind::fun(Mono, Mono)], Int), Int),
             KindError::KindMismatch(Kind::fun(Mono, Mono), Mono)
+        );
+    }
+
+    #[test]
+    fn unification() {
+        let mut env: Env<Type, ()> = Env::default();
+        assert_eq!(
+            env.unify(vec![(
+                Type::fun(Type::var(0), Type::var(0)),
+                Type::fun(Type::Int, Type::var(1))
+            )]),
+            Ok(Subst::from_iter(vec![
+                (Variable(0), Type::Int),
+                (Variable(1), Type::Int),
+            ]))
         );
     }
 }

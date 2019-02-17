@@ -442,12 +442,12 @@ impl Elaboration for Type {
 }
 
 impl Elaboration for Expr {
-    type Output = (ITerm, IType);
+    type Output = (ITerm, IType, Subst);
     type Error = TypeError;
 
     fn elaborate(&self, env: &mut Env) -> Result<Self::Output, Self::Error> {
-        let (t, ty, _) = self.infer(env)?;
-        Ok((t, ty))
+        let (t, ty, s) = self.infer(env)?;
+        Ok((t, ty, s))
     }
 }
 
@@ -532,7 +532,7 @@ impl Elaboration for Sig {
 }
 
 impl Elaboration for Binding {
-    type Output = (ITerm, Existential<HashMap<Label, SemanticSig>>);
+    type Output = (ITerm, Existential<HashMap<Label, SemanticSig>>, Subst);
     type Error = TypeError;
 
     fn elaborate(&self, env: &mut Env) -> Result<Self::Output, Self::Error> {
@@ -540,7 +540,7 @@ impl Elaboration for Binding {
         use SemanticSig::*;
         match *self {
             Val(ref id, ref e) => {
-                let (t, ty) = e.elaborate(env)?;
+                let (t, ty, s) = e.elaborate(env)?;
                 Ok((
                     ITerm::record(vec![(
                         Label::from(id.clone()),
@@ -550,6 +550,7 @@ impl Elaboration for Binding {
                         Label::from(id.clone()),
                         AtomicTerm(ty),
                     )])),
+                    s,
                 ))
             }
             Type(ref id, ref ty) => {
@@ -565,6 +566,7 @@ impl Elaboration for Binding {
                         Label::from(id.clone()),
                         AtomicType(ty, k),
                     )])),
+                    Subst::default(),
                 ))
             }
             Module(ref id, ref m) => {
@@ -587,6 +589,7 @@ impl Elaboration for Binding {
                         ),
                     ),
                     asig.map(|ssig| HashMap::from_iter(vec![(Label::from(id.clone()), ssig)])),
+                    Subst::default(),
                 ))
             }
             _ => unimplemented!(),
@@ -598,6 +601,7 @@ impl Elaboration for Module {
     type Output = (ITerm, AbstractSig);
     type Error = TypeError;
 
+    #[allow(clippy::many_single_char_names)]
     fn elaborate(&self, env: &mut Env) -> Result<Self::Output, Self::Error> {
         use Module::*;
         match *self {
@@ -613,9 +617,10 @@ impl Elaboration for Module {
                 let mut n = 0;
                 let enter_state = env.get_state();
                 for b in bs {
-                    let (t, ex) = b.elaborate(env)?;
+                    let (t, ex, s) = b.elaborate(env)?;
                     n += 1;
                     let n0 = n;
+                    body.apply(&s);
                     env.insert_types(ex.0.qs.clone().into_iter().map(|(k, s)| (k, Some(s))));
                     env.insert_dummy_value();
                     qs.extend(ex.0.qs.clone());
@@ -904,7 +909,7 @@ impl Expr {
                     .map_err(|e| TypeError::Unification(self.clone(), e))?;
                 t1.apply(&s3);
                 v.apply(&s3);
-                let s = s3.compose(s2).compose(s1);
+                let s = s1.compose(s2).compose(s3);
                 Ok((ITerm::app(t1, t2), v, s))
             }
             Int(n) => Ok((ITerm::Int(n), IType::Int, Subst::default())),
@@ -1040,6 +1045,14 @@ mod tests {
         }};
     }
 
+    macro_rules! assert_elaborate_ok_2 {
+        ($x:expr, ($r1:expr, $r2:expr)) => {{
+            let mut env = Env::default();
+            let p = $x.elaborate(&mut env).unwrap();
+            assert_eq!((p.0, p.1), ($r1, $r2));
+        }};
+    }
+
     macro_rules! assert_elaborate_err {
         ($x:expr, $r:expr) => {{
             let mut env = Env::default();
@@ -1068,9 +1081,9 @@ mod tests {
         use internal::UnificationError;
         use Expr::*;
 
-        assert_elaborate_ok!(Int(55), (ITerm::Int(55), IType::Int));
+        assert_elaborate_ok_2!(Int(55), (ITerm::Int(55), IType::Int));
 
-        assert_elaborate_ok!(
+        assert_elaborate_ok_2!(
             Expr::abs(Ident::from("x"), Int(55)),
             (
                 ITerm::abs(IType::var(0), ITerm::Int(55)),
@@ -1078,7 +1091,7 @@ mod tests {
             )
         );
 
-        assert_elaborate_ok!(
+        assert_elaborate_ok_2!(
             Expr::app(Expr::abs(Ident::from("x"), Int(55)), Int(98)),
             (
                 ITerm::app(ITerm::abs(IType::Int, ITerm::Int(55)), ITerm::Int(98)),
@@ -1099,7 +1112,7 @@ mod tests {
             TypeError::Env(EnvError::UnboundName(Name::from("x")))
         );
 
-        assert_elaborate_ok!(
+        assert_elaborate_ok_2!(
             Expr::abs(
                 Ident::from("x"),
                 Expr::path(Module::Ident(Ident::from("x")))
@@ -1120,7 +1133,7 @@ mod tests {
         use Binding::*;
         use SemanticSig::*;
 
-        assert_elaborate_ok!(
+        assert_elaborate_ok_2!(
             Val(Ident::from("x"), Expr::Int(23)),
             (
                 ITerm::record(vec![(Label::from("x"), ITerm::Int(23))]),
@@ -1131,7 +1144,7 @@ mod tests {
             )
         );
 
-        assert_elaborate_ok!(
+        assert_elaborate_ok_2!(
             Val(Ident::from("x"), Expr::abs(Ident::from("y"), Expr::Int(22))),
             (
                 ITerm::record(vec![(
@@ -1145,7 +1158,7 @@ mod tests {
             )
         );
 
-        assert_elaborate_ok!(
+        assert_elaborate_ok_2!(
             Type(Ident::from("t"), T::Int),
             (
                 ITerm::record(vec![(
@@ -1162,7 +1175,7 @@ mod tests {
             )
         );
 
-        assert_elaborate_ok!(
+        assert_elaborate_ok_2!(
             Type(Ident::from("t"), T::fun(T::Int, T::Int)),
             (
                 ITerm::record(vec![(
@@ -1522,6 +1535,29 @@ mod tests {
                     (l("N"), SemanticSig::structure_sig(None))
                 ]))
             )
+        );
+
+        assert_eq!(
+            Seq(vec![
+                Val(id("f"), Expr::abs(id("x"), Expr::path(Ident(id("x"))))),
+                Val(
+                    id("y"),
+                    Expr::app(
+                        Expr::path(Ident(id("f"))),
+                        Expr::app(Expr::path(Ident(id("f"))), Expr::Int(1))
+                    )
+                )
+            ])
+            .elaborate(&mut Env::default())
+            .ok()
+            .map(|p| p.1),
+            Some(Existential::from(SemanticSig::structure_sig(vec![
+                (l("y"), SemanticSig::AtomicTerm(IType::Int)),
+                (
+                    l("f"),
+                    SemanticSig::AtomicTerm(IType::fun(IType::Int, IType::Int))
+                ),
+            ])))
         );
     }
 
