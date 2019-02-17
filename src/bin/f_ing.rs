@@ -8,6 +8,7 @@ use colored::*;
 
 use modules::rrd2014;
 use modules::rrd2014::internal;
+use modules::rrd2014::internal::dynamic;
 use modules::rrd2014::parser;
 use modules::rrd2014::Module;
 
@@ -48,6 +49,14 @@ enum Opt {
         #[structopt(name = "filename")]
         file: String,
     },
+
+    #[structopt(name = "exec")]
+    /// Executes a program.
+    Exec {
+        /// Input filename
+        #[structopt(name = "filename")]
+        file: String,
+    },
 }
 
 fn main() {
@@ -84,6 +93,30 @@ fn run(opt: Opt) -> Result<(), Error> {
                     println!("{}", "The translation is sound.".bright_green().bold());
                     println!("{}", "internal type:".bright_cyan().bold());
                     println!("{:?}", ty);
+                } else {
+                    Err(format_err!(
+                        "{}:\ntype mismatch:\n{:?}\nand\n{:?}",
+                        "[bug] invariant violation".bright_red().bold(),
+                        ty,
+                        expect
+                    ))?;
+                }
+            }
+        },
+        Opt::Exec { file } => match elaborate(parse(file)?)? {
+            (t, asig) => {
+                let ty = internal::typecheck(&t).with_context(|e| {
+                    format!(
+                        "{}:\n{}",
+                        "[bug(unsound)] internal type error".bright_red().bold(),
+                        e
+                    )
+                })?;
+                let expect = asig.into();
+                if ty.equal(&expect) {
+                    let v = dynamic::reduce(t)?;
+                    println!("{}:", "result".bright_green().bold());
+                    println!("{:?}", v);
                 } else {
                     Err(format_err!(
                         "{}:\ntype mismatch:\n{:?}\nand\n{:?}",

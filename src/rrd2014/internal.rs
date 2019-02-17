@@ -10,7 +10,7 @@ use std::iter::FromIterator;
 
 use failure::Fail;
 
-mod dynamic;
+pub mod dynamic;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Name(String);
