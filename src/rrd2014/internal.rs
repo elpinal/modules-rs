@@ -136,6 +136,9 @@ pub enum TypeError {
 
     #[fail(display = "kind error: {}", _0)]
     KindError(KindError),
+
+    #[fail(display = "in application of {:?} to {:?}: {}", _0, _1, _2)]
+    Application(Term, Term, Box<TypeError>),
 }
 
 #[derive(Clone, Default)]
@@ -1213,7 +1216,11 @@ impl Term {
                 let ty2 = t2.type_of(ctx)?.reduce();
                 match ty1 {
                     Type::Fun(ty11, ty12) if ty11.equal(&ty2) => Ok(*ty12),
-                    Type::Fun(ty11, _) => Err(TypeError::TypeMismatch(*ty11, ty2)),
+                    Type::Fun(ty11, _) => Err(TypeError::Application(
+                        *t1.clone(),
+                        *t2.clone(),
+                        Box::new(TypeError::TypeMismatch(*ty11, ty2)),
+                    )),
                     _ => Err(TypeError::NotFunction(ty1)),
                 }
             }
