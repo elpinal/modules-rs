@@ -80,6 +80,9 @@ pub struct Env<T, S> {
     tenv: Vec<(Kind, S)>,
     venv: Vec<Option<T>>,
 
+    /// A type environment for generated variables.
+    gtenv: Vec<Kind>,
+
     /// A name-to-index map.
     nmap: HashMap<Name, usize>,
 
@@ -155,6 +158,7 @@ impl<T, S> Default for Env<T, S> {
         Env {
             tenv: vec![],
             venv: vec![],
+            gtenv: vec![],
             nmap: HashMap::new(),
             n: 0,
         }
@@ -1560,6 +1564,7 @@ impl<'a, S: Clone + Default> From<Context<'a>> for Env<Type, S> {
                 .into_iter()
                 .map(|ty| Some(ty.into_owned()))
                 .collect(),
+            gtenv: vec![],
             nmap: HashMap::new(),
             n: 0, // TODO: Is this correct?
         }
