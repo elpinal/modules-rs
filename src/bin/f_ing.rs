@@ -86,7 +86,8 @@ fn run(opt: Opt) -> Result<(), Error> {
                     println!("{:?}", ty);
                 } else {
                     Err(format_err!(
-                        "invariant violation: type mismatch:\n{:?}\nand\n{:?}",
+                        "{}:\ntype mismatch:\n{:?}\nand\n{:?}",
+                        "[bug] invariant violation".bright_red().bold(),
                         ty,
                         expect
                     ))?;
