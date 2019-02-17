@@ -10,6 +10,8 @@ use std::iter::FromIterator;
 
 use failure::Fail;
 
+mod dynamic;
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Name(String);
 
@@ -517,6 +519,12 @@ impl Record<Type> {
         F: Fn(usize, Variable) -> Type,
     {
         self.0.values_mut().for_each(|ty| ty.map(f, c));
+    }
+}
+
+impl<T> Record<T> {
+    fn get(&self, l: &Label) -> Option<&T> {
+        self.0.get(l)
     }
 }
 
