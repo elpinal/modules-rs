@@ -1407,7 +1407,7 @@ impl<T, S> Env<T, S> {
         self.venv.iter_mut().for_each(|x| x.shift(-1));
     }
 
-    /// One should probably use `drop_values_state` before `drop_value` in case indices in value
+    /// One should probably use `drop_values_state` before `drop_type` in case indices in value
     /// environment become negative and then the program panics.
     pub fn drop_types(&mut self, n: usize)
     where
@@ -1419,24 +1419,13 @@ impl<T, S> Env<T, S> {
         self.venv.iter_mut().for_each(|x| x.shift(-m));
     }
 
-    pub fn insert_value(&mut self, name: Name, x: T) -> Option<Variable> {
-        let v = self.nmap.get(&name).map(|&n| Variable(n));
+    pub fn insert_value(&mut self, name: Name, x: T) {
         self.nmap.insert(name, self.venv.len());
         self.venv.push(Some(x));
-        v
     }
 
     pub fn insert_dummy_value(&mut self) {
         self.venv.push(None);
-    }
-
-    pub fn drop_value(&mut self, name: Name, prev: Option<Variable>) {
-        self.venv.pop();
-        if let Some(v) = prev {
-            self.nmap.insert(name, v.0);
-        } else {
-            self.nmap.remove(&name);
-        }
     }
 
     pub fn drop_values_state(&mut self, n: usize, state: EnvState) {
