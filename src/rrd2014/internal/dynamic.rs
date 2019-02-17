@@ -6,7 +6,7 @@ use super::*;
 /// Variables indexed by 0 is an argument to the closure.
 /// The other variables are captured by `env`.
 #[derive(Clone, Debug, PartialEq)]
-struct Closure {
+pub struct Closure {
     body: Term,
     env: DynEnv,
 }
@@ -15,13 +15,13 @@ struct Closure {
 /// `body` is the body of the function of a closure.
 /// All variables are captured by `env`.
 #[derive(Clone, Debug, PartialEq)]
-struct TypeClosure {
+pub struct TypeClosure {
     body: Term,
     env: DynEnv,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-enum Value {
+pub enum Value {
     Int(isize),
     Closure(Closure),
     TypeClosure(TypeClosure),
@@ -30,9 +30,14 @@ enum Value {
 }
 
 /// A dynamic environment.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 struct DynEnv {
     vs: Vec<Value>,
+}
+
+pub fn reduce(t: Term) -> Fallible<Value> {
+    let mut env = DynEnv::default();
+    env.reduce(t)
 }
 
 impl Value {
