@@ -2,10 +2,12 @@ use structopt::StructOpt;
 
 use failure::format_err;
 use failure::Error;
+use failure::ResultExt;
 
 use colored::*;
 
 use modules::rrd2014::elaborate;
+use modules::rrd2014::internal;
 use modules::rrd2014::parser;
 use modules::rrd2014::Module;
 
@@ -37,6 +39,15 @@ enum Opt {
         #[structopt(name = "filename")]
         file: String,
     },
+
+    #[structopt(name = "typecheck-internal")]
+    /// Translates a program into an internal program, and then typechecks it to ensure type
+    /// soundness.
+    TypecheckInternal {
+        /// Input filename
+        #[structopt(name = "filename")]
+        file: String,
+    },
 }
 
 fn main() {
@@ -57,6 +68,22 @@ fn run(opt: Opt) -> Result<(), Error> {
                 println!();
                 println!("{}:", "translated F\u{03c9} term".bright_cyan().bold());
                 println!("{:?}", t);
+            }
+        },
+        Opt::TypecheckInternal { file } => match elaborate(parse(file)?)? {
+            (t, asig) => {
+                let ty = internal::typecheck(&t)
+                    .with_context(|e| format!("internal type error: {}", e))?;
+                let expect = asig.into();
+                if ty.equal(&expect) {
+                    println!("sound");
+                } else {
+                    Err(format_err!(
+                        "invariant violation: type mismatch:\n{:?}\nand\n{:?}",
+                        ty,
+                        expect
+                    ))?;
+                }
             }
         },
     }

@@ -87,7 +87,7 @@ pub struct Env<T, S> {
 
 pub struct EnvState(HashMap<Name, usize>);
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Context<'a> {
     tenv: Vec<Cow<'a, Kind>>,
     venv: Vec<Cow<'a, Type>>,
@@ -1293,6 +1293,10 @@ impl Term {
             Int(_) => Ok(Type::Int),
         }
     }
+}
+
+pub fn typecheck(t: &Term) -> Result<Type, TypeError> {
+    t.type_of(&mut Context::default())
 }
 
 #[derive(Debug, Fail, PartialEq)]
