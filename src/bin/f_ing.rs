@@ -6,7 +6,7 @@ use failure::ResultExt;
 
 use colored::*;
 
-use modules::rrd2014::elaborate;
+use modules::rrd2014;
 use modules::rrd2014::internal;
 use modules::rrd2014::parser;
 use modules::rrd2014::Module;
@@ -76,7 +76,9 @@ fn run(opt: Opt) -> Result<(), Error> {
                     .with_context(|e| format!("internal type error: {}", e))?;
                 let expect = asig.into();
                 if ty.equal(&expect) {
-                    println!("sound");
+                    println!("{}", "The translation is sound.".bright_green().bold());
+                    println!("{}", "internal type:".bright_cyan().bold());
+                    println!("{:?}", ty);
                 } else {
                     Err(format_err!(
                         "invariant violation: type mismatch:\n{:?}\nand\n{:?}",
@@ -95,4 +97,10 @@ where
     P: AsRef<std::path::Path>,
 {
     parser::parse_file(&file)?.ok_or_else(|| format_err!("parse error"))
+}
+
+fn elaborate(m: Module) -> Result<(internal::Term, rrd2014::AbstractSig), Error> {
+    let p = rrd2014::elaborate(m)
+        .with_context(|e| format!("{}:\n{}", "type error".bright_red().bold(), e))?;
+    Ok(p)
 }

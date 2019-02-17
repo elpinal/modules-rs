@@ -105,7 +105,7 @@ pub struct Existential<T>(Quantified<T>);
 #[derive(Clone, Debug, PartialEq)]
 pub struct Universal<T>(Quantified<T>);
 
-type AbstractSig = Existential<SemanticSig>;
+pub type AbstractSig = Existential<SemanticSig>;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Fun(SemanticSig, AbstractSig);
