@@ -75,7 +75,7 @@ fn run(opt: Opt) -> Result<(), Error> {
                 let ty = internal::typecheck(&t).with_context(|e| {
                     format!(
                         "{}:\n{}",
-                        "[unsound] internal type error".bright_red().bold(),
+                        "[bug(unsound)] internal type error".bright_red().bold(),
                         e
                     )
                 })?;
