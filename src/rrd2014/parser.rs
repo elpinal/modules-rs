@@ -74,6 +74,12 @@ enum LexError {
 
 type Res<T> = Result<T, LexError>;
 
+impl TokenKind {
+    fn ident(s: &str) -> Self {
+        TokenKind::Ident(s.to_string())
+    }
+}
+
 impl Lexer {
     fn new(src: Vec<char>) -> Self {
         Lexer {
@@ -374,24 +380,28 @@ impl Parser {
                 self.proceed();
                 Some(Expr::Int(n))
             }
-            TokenKind::Ident(_) => {
-                let m = self.module()?;
-                Some(Expr::path(m))
+            TokenKind::Ident(s) => {
+                self.proceed();
+                Some(Expr::path(Module::Ident(Ident::from(s))))
             }
             TokenKind::LParen => {
                 let state = self.save();
-                if let Some(m) = self.module() {
-                    return Some(Expr::path(m));
+                if let Some(e) = self.expr_atom_aux() {
+                    return Some(e);
                 } else {
                     self.restore(state);
                 }
-                self.proceed();
-                let e = self.expr()?;
-                self.expect(TokenKind::RParen)?;
-                Some(e)
+                Some(Expr::path(self.module()?))
             }
             _ => None,
         }
+    }
+
+    fn expr_atom_aux(&mut self) -> Option<Expr> {
+        self.proceed();
+        let e = self.expr()?;
+        self.expect(TokenKind::RParen)?;
+        Some(e)
     }
 
     fn expect(&mut self, kind: TokenKind) -> Option<Token> {
@@ -422,22 +432,18 @@ impl Parser {
     }
 
     fn expr(&mut self) -> Option<Expr> {
-        match self.peek() {
-            Some(Token {
-                kind: TokenKind::Lambda,
-                ..
-            }) => {
+        match self.peek()?.kind {
+            TokenKind::Lambda => {
                 self.proceed();
                 self.abs()
             }
-            Some(_) => {
+            _ => {
                 let mut e0 = self.expr_atom()?;
                 while let Some(e) = self.expr_atom() {
                     e0 = Expr::app(e0, e);
                 }
                 Some(e0)
             }
-            None => None,
         }
     }
 
@@ -767,6 +773,30 @@ mod tests {
             pos: Default::default(),
         }]);
         assert_eq!(p.expr(), Some(Expr::Int(33)));
+
+        let mut p = Parser::new(vec![Token {
+            kind: TokenKind::ident("a"),
+            pos: Default::default(),
+        }]);
+        assert_eq!(p.expr(), Some(Expr::path(Module::Ident(Ident::from("a")))));
+
+        let mut p = Parser::new(vec![
+            Token {
+                kind: TokenKind::ident("a"),
+                pos: Default::default(),
+            },
+            Token {
+                kind: TokenKind::ident("a"),
+                pos: Default::default(),
+            },
+        ]);
+        assert_eq!(
+            p.expr(),
+            Some(Expr::app(
+                Expr::path(Module::Ident(Ident::from("a"))),
+                Expr::path(Module::Ident(Ident::from("a")))
+            ))
+        );
     }
 
     #[test]
