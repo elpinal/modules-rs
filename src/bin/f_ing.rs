@@ -3,6 +3,8 @@ use structopt::StructOpt;
 use failure::format_err;
 use failure::Error;
 
+use colored::*;
+
 use modules::rrd2014::elaborate;
 use modules::rrd2014::parser;
 use modules::rrd2014::Module;
@@ -50,10 +52,10 @@ fn run(opt: Opt) -> Result<(), Error> {
         }
         Opt::Typecheck { file } => match elaborate(parse(file)?)? {
             (t, asig) => {
-                println!("signature:");
+                println!("{}:", "signature".bright_cyan().bold());
                 println!("{:?}", asig);
                 println!();
-                println!("translated term:");
+                println!("{}:", "translated F\u{03c9} term".bright_cyan().bold());
                 println!("{:?}", t);
             }
         },

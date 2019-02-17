@@ -5,6 +5,7 @@ authors = ["elpinal"]
 edition = "2018"
 
 [dependencies]
+colored = "1.7"
 failure = "0.1.3"
 structopt = "0.2"
 
