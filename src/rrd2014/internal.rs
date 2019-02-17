@@ -260,16 +260,19 @@ impl Substitution for Type {
             }
             Record(ref mut r) => r.apply(s),
             Forall(ref mut k, ref mut ty) => {
+                let s = &s.clone().shift(1);
                 k.apply(s);
-                ty.apply(s); // The possibility of variable capture.
+                ty.apply(s);
             }
             Some(ref mut k, ref mut ty) => {
+                let s = &s.clone().shift(1);
                 k.apply(s);
-                ty.apply(s); // The possibility of variable capture.
+                ty.apply(s);
             }
             Abs(ref mut k, ref mut ty) => {
+                let s = &s.clone().shift(1);
                 k.apply(s);
-                ty.apply(s); // The possibility of variable capture.
+                ty.apply(s);
             }
             App(ref mut ty1, ref mut ty2) => {
                 ty1.apply(s);
@@ -296,8 +299,9 @@ impl Substitution for Term {
             Record(ref mut r) => r.apply(s),
             Proj(ref mut t, _) => t.apply(s),
             Poly(ref mut k, ref mut t) => {
+                let s = &s.clone().shift(1);
                 k.apply(s);
-                t.apply(s); // The possibility of variable capture.
+                t.apply(s);
             }
             Inst(ref mut t, ref mut ty) => {
                 t.apply(s);
@@ -309,8 +313,9 @@ impl Substitution for Term {
                 ty2.apply(s);
             }
             Unpack(ref mut t1, ref mut t2) => {
+                let s = &s.clone().shift(1);
                 t1.apply(s);
-                t2.apply(s); // The possibility of variable capture.
+                t2.apply(s);
             }
         }
     }
