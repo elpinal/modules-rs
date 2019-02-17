@@ -683,6 +683,28 @@ impl Elaboration for Module {
                     }),
                 ))
             }
+            Proj(ref m, ref id) => {
+                let (t, asig) = m.elaborate(env)?;
+                let asig0 = asig.clone().try_map::<_, _, TypeError, _>(|ssig| {
+                    let mut m = ssig.get_structure()?;
+                    m.remove(&id.into())
+                        .ok_or_else(|| TypeError::MissingLabel(id.into()))
+                })?;
+                Ok((
+                    ITerm::unpack(
+                        t,
+                        asig.0.qs.len(),
+                        asig.clone().into(),
+                        ITerm::pack(
+                            ITerm::proj(ITerm::var(0), Some(id.into())),
+                            (0..asig.0.qs.len()).map(IType::var).collect(),
+                            asig.0.qs.iter().map(|p| p.0.clone()),
+                            asig0.0.body.clone().into(),
+                        ),
+                    ),
+                    asig0,
+                ))
+            }
             Seal(ref id, ref sig) => {
                 let (ssig, v) = env.lookup_value_by_name(id.into())?;
                 let asig = sig.elaborate(env)?;
