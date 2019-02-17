@@ -71,7 +71,7 @@ fn run(opt: Opt) -> Result<(), Error> {
             println!("{:?}", parse(file)?);
         }
         Opt::Typecheck { file } => match elaborate(parse(file)?)? {
-            (t, asig) => {
+            (t, asig, _) => {
                 println!("{}:", "signature".bright_cyan().bold());
                 println!("{:?}", asig);
                 println!();
@@ -80,8 +80,8 @@ fn run(opt: Opt) -> Result<(), Error> {
             }
         },
         Opt::TypecheckInternal { file } => match elaborate(parse(file)?)? {
-            (t, asig) => {
-                let ty = internal::typecheck(&t).with_context(|e| {
+            (t, asig, gtenv) => {
+                let ty = internal::typecheck(&t, gtenv).with_context(|e| {
                     format!(
                         "{}:\n{}",
                         "[bug(unsound)] internal type error".bright_red().bold(),
@@ -104,8 +104,8 @@ fn run(opt: Opt) -> Result<(), Error> {
             }
         },
         Opt::Exec { file } => match elaborate(parse(file)?)? {
-            (t, asig) => {
-                let ty = internal::typecheck(&t).with_context(|e| {
+            (t, asig, gtenv) => {
+                let ty = internal::typecheck(&t, gtenv).with_context(|e| {
                     format!(
                         "{}:\n{}",
                         "[bug(unsound)] internal type error".bright_red().bold(),
@@ -138,8 +138,9 @@ where
     parser::parse_file(&file)?.ok_or_else(|| format_err!("parse error"))
 }
 
-fn elaborate(m: Module) -> Result<(internal::Term, rrd2014::AbstractSig), Error> {
-    let p = rrd2014::elaborate(m)
-        .with_context(|e| format!("{}:\n{}", "type error".bright_red().bold(), e))?;
-    Ok(p)
+fn elaborate(
+    m: Module,
+) -> Result<(internal::Term, rrd2014::AbstractSig, Vec<internal::Kind>), Error> {
+    Ok(rrd2014::elaborate(m)
+        .with_context(|e| format!("{}:\n{}", "type error".bright_red().bold(), e))?)
 }

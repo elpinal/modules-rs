@@ -345,9 +345,10 @@ trait Elaboration {
     fn elaborate(&self, env: &mut Env) -> Result<Self::Output, Self::Error>;
 }
 
-pub fn elaborate(m: Module) -> Result<(ITerm, AbstractSig), TypeError> {
-    let triple = m.elaborate(&mut Env::default())?;
-    Ok((triple.0, triple.1))
+pub fn elaborate(m: Module) -> Result<(ITerm, AbstractSig, Vec<IKind>), TypeError> {
+    let mut env = Env::default();
+    let triple = m.elaborate(&mut env)?;
+    Ok((triple.0, triple.1, env.get_generated_type_env()))
 }
 
 trait Subtype {

@@ -105,6 +105,7 @@ pub struct EnvState(HashMap<Name, usize>);
 pub struct Context<'a> {
     tenv: Vec<Cow<'a, Kind>>,
     venv: Vec<Cow<'a, Type>>,
+    gtenv: Vec<Kind>,
 }
 
 #[derive(Debug, Fail, PartialEq)]
@@ -1341,8 +1342,11 @@ impl Term {
     }
 }
 
-pub fn typecheck(t: &Term) -> Result<Type, TypeError> {
-    t.type_of(&mut Context::default())
+pub fn typecheck(t: &Term, gtenv: Vec<Kind>) -> Result<Type, TypeError> {
+    t.type_of(&mut Context {
+        gtenv,
+        ..Default::default()
+    })
 }
 
 #[derive(Debug, Fail, PartialEq)]
@@ -1367,6 +1371,10 @@ pub enum UnificationError {
 }
 
 impl<T, S> Env<T, S> {
+    pub fn get_generated_type_env(self) -> Vec<Kind> {
+        self.gtenv
+    }
+
     pub fn lookup_type(&self, v: Variable) -> Result<(Kind, S), EnvError>
     where
         S: Clone + Default,
@@ -1592,7 +1600,7 @@ impl<'a, S: Clone + Default> From<Context<'a>> for Env<Type, S> {
                 .into_iter()
                 .map(|ty| Some(ty.into_owned()))
                 .collect(),
-            gtenv: vec![],
+            gtenv: ctx.gtenv,
             nmap: HashMap::new(),
             n: 0, // TODO: Is this correct?
         }
