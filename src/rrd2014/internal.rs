@@ -134,8 +134,11 @@ pub enum TypeError {
     #[fail(display = "not function type: {:?}", _0)]
     NotFunction(Type),
 
-    #[fail(display = "missing label: {:?}", _0)]
-    MissingLabel(Label),
+    #[fail(
+        display = "missing label {:?} in {:?}, which is the type of {:?}",
+        _2, _1, _0
+    )]
+    MissingLabel(Term, Record<Type>, Label),
 
     #[fail(display = "not record type: {:?}", _0)]
     NotRecord(Type),
@@ -1272,7 +1275,7 @@ impl Term {
             Proj(ref t, ref l) => match t.type_of(ctx)?.reduce() {
                 Type::Record(mut r) => {
                     r.0.remove(l)
-                        .ok_or_else(|| TypeError::MissingLabel(l.clone()))
+                        .ok_or_else(|| TypeError::MissingLabel(*t.clone(), r, l.clone()))
                 }
                 ty => Err(TypeError::NotRecord(ty)),
             },
