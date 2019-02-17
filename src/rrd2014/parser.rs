@@ -382,7 +382,13 @@ impl Parser {
             }
             TokenKind::Ident(s) => {
                 self.proceed();
-                Some(Expr::path(Module::Ident(Ident::from(s))))
+                let mut m0 = Module::Ident(Ident::from(s));
+                while self.peek_expect(TokenKind::Dot) {
+                    self.proceed();
+                    let id = self.ident()?;
+                    m0 = Module::proj(m0, id);
+                }
+                Some(Expr::path(m0))
             }
             TokenKind::LParen => {
                 let state = self.save();
