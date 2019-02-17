@@ -1490,9 +1490,8 @@ impl<T, S> Env<T, S> {
     where
         T: Shift,
     {
-        let l = self.tenv.len();
         self.insert_type(k, x);
-        Variable(l)
+        Variable(0)
     }
 }
 
