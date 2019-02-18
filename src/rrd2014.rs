@@ -167,6 +167,9 @@ pub enum TypeError {
 
     #[fail(display = "missing label: {:?}", _0)]
     MissingLabel(Label),
+
+    #[fail(display = "{:?} is not sub-signature of {:?}", _0, _1)]
+    NotSubsignature(SemanticSig, SemanticSig),
 }
 
 impl From<EnvError> for TypeError {
@@ -937,7 +940,7 @@ impl Subtype for SemanticSig {
                     ),
                 ))
             }
-            _ => unimplemented!(),
+            _ => Err(TypeError::NotSubsignature(self.clone(), another.clone())),
         }
     }
 }
