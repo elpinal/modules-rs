@@ -888,6 +888,47 @@ impl Subtype for SemanticSig {
                 }
                 Ok(ITerm::abs(IType::from(self.clone()), ITerm::record(m)))
             }
+            (&FunctorSig(ref u1), &FunctorSig(ref u2)) => {
+                env.insert_types(u2.0.qs.clone().into_iter().map(|(k, s)| (k, Some(s))));
+                let Fun(ssig1, mut asig1) = *u1.0.body.clone();
+                let Fun(ref ssig2, ref asig2) = *u2.0.body;
+                // contra-variant.
+                let (t1, tys) = ssig2.r#match(
+                    env,
+                    &Existential(Quantified {
+                        qs: u1.0.qs.clone(),
+                        body: ssig1,
+                    }),
+                )?;
+                let s = Subst::from_iter(
+                    (0..u1.0.qs.len())
+                        .rev()
+                        .map(internal::Variable::new)
+                        .zip(tys.clone()),
+                );
+                asig1.apply(&s);
+                // TODO: maybe `asig1.shift(-u1.0.qs.len())` is needed here.
+
+                // covariant.
+                let t2 = asig1.subtype_of(env, &asig2)?;
+                env.drop_types(u2.0.qs.len());
+                Ok(ITerm::abs(
+                    u1.clone().into(),
+                    ITerm::poly(
+                        u2.0.qs.iter().map(|p| p.0.clone()),
+                        ITerm::abs(
+                            ssig2.clone().into(),
+                            ITerm::app(
+                                t2,
+                                ITerm::app(
+                                    ITerm::inst(ITerm::var(1), tys),
+                                    ITerm::app(t1, ITerm::var(0)),
+                                ),
+                            ),
+                        ),
+                    ),
+                ))
+            }
             _ => unimplemented!(),
         }
     }
