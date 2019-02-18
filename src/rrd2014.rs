@@ -736,6 +736,26 @@ impl Elaboration for Module {
                     s,
                 ))
             }
+            Fun(ref id, ref sig, ref m) => {
+                let (asig1, s1) = sig.elaborate(env)?;
+                let enter_state = env.get_state();
+                env.insert_types(asig1.0.qs.clone().into_iter().map(|(k, s)| (k, Some(s))));
+                env.insert_value(Name::from(id.clone()), asig1.0.body.clone());
+                let (t, asig2, s2) = m.elaborate(env)?;
+                // TODO: apply `s2` to `asig1`?
+                env.drop_values_state(1, enter_state);
+                env.drop_types(asig1.0.qs.len());
+                Ok((
+                    ITerm::poly(
+                        asig1.0.qs.iter().map(|p| p.0.clone()),
+                        ITerm::abs(asig1.0.body.clone().into(), t),
+                    ),
+                    Existential::from(SemanticSig::FunctorSig(
+                        Universal::from(asig1).map(|ssig| Box::new(self::Fun(ssig, asig2))),
+                    )),
+                    s1.compose(s2),
+                ))
+            }
             _ => unimplemented!(),
         }
     }
