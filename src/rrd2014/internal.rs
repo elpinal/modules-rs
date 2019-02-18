@@ -182,6 +182,11 @@ impl<T, S> Default for Env<T, S> {
     }
 }
 
+/// Free generated type variables.
+pub trait Fgtv {
+    fn fgtv(&self) -> HashSet<usize>;
+}
+
 pub trait Shift {
     fn shift_above(&mut self, c: usize, d: isize);
 
@@ -363,6 +368,33 @@ impl<T: Substitution, S> Substitution for Env<T, S> {
     fn apply(&mut self, s: &Subst) {
         self.tenv.iter_mut().for_each(|p| p.0.apply(s));
         self.venv.iter_mut().for_each(|x| x.apply(s));
+    }
+}
+
+impl Fgtv for Type {
+    fn fgtv(&self) -> HashSet<usize> {
+        self.ftv()
+            .into_iter()
+            .filter_map(|v| match v {
+                V(_) => None,
+                Variable::Generated(n) => Some(n),
+            })
+            .collect()
+    }
+}
+
+impl<T: Fgtv, S> Fgtv for Env<T, S> {
+    fn fgtv(&self) -> HashSet<usize> {
+        self.venv.iter().flat_map(|x| x.fgtv()).collect()
+    }
+}
+
+impl<T: Fgtv> Fgtv for Option<T> {
+    fn fgtv(&self) -> HashSet<usize> {
+        match *self {
+            Some(ref x) => x.fgtv(),
+            None => HashSet::new(),
+        }
     }
 }
 
@@ -912,6 +944,27 @@ impl Type {
             }
             Int => Ok(Mono),
         }
+    }
+
+    pub fn close<T, S>(mut self, env: &Env<T, S>) -> Self
+    where
+        T: Fgtv,
+        S: Clone + Default,
+    {
+        let tvs = self.fgtv();
+        let env_tvs = env.fgtv();
+        let tvs: Vec<_> = tvs.difference(&env_tvs).collect();
+        let n = tvs.len();
+        self.shift(isize::try_from(n).unwrap());
+        self.apply(&Subst::from_iter(
+            tvs.iter()
+                .enumerate()
+                .map(|(i, &&v)| (Variable::Generated(v), Type::var(i))),
+        ));
+        let ks = tvs
+            .into_iter()
+            .map(|&v| env.lookup_type(Variable::Generated(v)).unwrap().0);
+        Type::forall(ks, self)
     }
 }
 
@@ -1470,8 +1523,8 @@ impl<T, S> Env<T, S> {
         self.venv.iter_mut().for_each(|x| x.shift(-1));
     }
 
-    /// One should probably use `drop_values_state` before `drop_type` in case indices in value
-    /// environment become negative and then the program panics.
+    /// One should probably use `drop_values_state` before `drop_types` and `drop_type` in case
+    /// indices in value environment become negative and then the program panics.
     pub fn drop_types(&mut self, n: usize)
     where
         T: Shift,
@@ -2114,6 +2167,35 @@ mod tests {
             Ok(Subst::from_iter(
                 vec![(V(0), Type::Int), (V(1), Type::Int),]
             ))
+        );
+    }
+
+    #[test]
+    fn type_close() {
+        use Kind::*;
+        use Type::*;
+
+        let mut env = <Env<Type, ()>>::default();
+
+        assert_eq!(Int.close(&env), Int);
+        assert_eq!(Type::var(0).close(&env), Type::var(0));
+
+        let v = env.fresh_type_variable(Mono);
+
+        assert_eq!(Var(v).close(&env), Type::forall(vec![Mono], Type::var(0)));
+        assert_eq!(Type::var(0).close(&env), Type::var(0));
+        assert_eq!(
+            Type::fun(Var(v), Type::var(0)).close(&env),
+            Type::forall(vec![Mono], Type::fun(Type::var(0), Type::var(1)))
+        );
+
+        env.insert_value(Name::from("a"), Type::Var(v));
+
+        assert_eq!(Var(v).close(&env), Var(v));
+        assert_eq!(Type::var(0).close(&env), Type::var(0));
+        assert_eq!(
+            Type::fun(Var(v), Type::var(0)).close(&env),
+            Type::fun(Var(v), Type::var(0))
         );
     }
 }
