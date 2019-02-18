@@ -128,7 +128,6 @@ enum SemanticTerm {
 struct BindingInformation {
     t: ITerm,
     n: usize,
-    ty: IType,
     w: Vec<ITerm>,
 }
 
@@ -284,7 +283,6 @@ impl Substitution for BindingInformation {
     fn apply(&mut self, s: &Subst) {
         // This is not verified to be correct.
         self.t.apply(s);
-        self.ty.apply(s);
         self.w.apply(s);
     }
 }
@@ -616,7 +614,6 @@ impl Elaboration for Binding {
                     ITerm::unpack(
                         t,
                         asig.0.qs.len(),
-                        asig.clone().into(),
                         ITerm::pack(
                             ITerm::record(vec![(Label::from(id.clone()), ITerm::var(0))]),
                             (0..asig.0.qs.len()).map(IType::var).collect(),
@@ -669,18 +666,14 @@ impl Elaboration for Module {
                     qs.extend(ex.0.qs.clone());
                     body.extend(ex.0.body.clone());
                     let mut w = Vec::new();
-                    for (i, (l, ssig)) in ex.0.body.iter().enumerate() {
+                    let len = ex.0.qs.len();
+                    for (i, (l, ssig)) in ex.0.body.into_iter().enumerate() {
                         ls.insert(l.clone(), n0);
                         w.push(ITerm::proj(ITerm::var(i), Some(l.clone())));
                         n += 1;
-                        env.insert_value(Name::try_from(l.clone()).unwrap(), ssig.clone());
+                        env.insert_value(Name::try_from(l).unwrap(), ssig);
                     }
-                    v.push(BindingInformation {
-                        t,
-                        n: ex.0.qs.len(),
-                        ty: IType::from(ex.map(SemanticSig::StructureSig)),
-                        w,
-                    });
+                    v.push(BindingInformation { t, n: len, w });
                 }
                 env.drop_values_state(n, enter_state);
                 env.drop_types(qs.len());
@@ -694,9 +687,7 @@ impl Elaboration for Module {
                         qs.iter().map(|p| p.0.clone()),
                         SemanticSig::StructureSig(body.clone()).into(),
                     ),
-                    |t0, BindingInformation { t, n, ty, w }| {
-                        ITerm::unpack(t, n, ty, ITerm::let_in(w, t0))
-                    },
+                    |t0, BindingInformation { t, n, w }| ITerm::unpack(t, n, ITerm::let_in(w, t0)),
                 );
                 Ok((
                     t,
@@ -708,6 +699,7 @@ impl Elaboration for Module {
                 ))
             }
             Proj(ref m, ref id) => {
+                // TODO: there may be room for performance improvement.
                 let (t, asig, s) = m.elaborate(env)?;
                 let asig0 = asig.clone().try_map::<_, _, TypeError, _>(|ssig| {
                     let mut m = ssig.get_structure()?;
@@ -718,7 +710,6 @@ impl Elaboration for Module {
                     ITerm::unpack(
                         t,
                         asig.0.qs.len(),
-                        asig.clone().into(),
                         ITerm::pack(
                             ITerm::proj(ITerm::var(0), Some(id.into())),
                             (0..asig.0.qs.len()).map(IType::var).collect(),
@@ -763,7 +754,7 @@ impl Elaboration for Path {
             .mono()
             .map_err(TypeError::NotMono)?;
         Ok((
-            ITerm::unpack(t, asig.0.qs.len(), asig.clone().into(), ITerm::var(0)),
+            ITerm::unpack(t, asig.0.qs.len(), ITerm::var(0)),
             asig.0.body,
             s,
         ))
@@ -837,11 +828,10 @@ impl Subtype for AbstractSig {
         let ty: IType = self.clone().into();
         let (t, tys) = self.0.body.r#match(env, another)?;
         Ok(ITerm::abs(
-            ty.clone(),
+            ty,
             ITerm::unpack(
                 ITerm::var(0),
                 self.0.qs.len(),
-                ty,
                 ITerm::pack(
                     ITerm::app(t, ITerm::var(0)),
                     tys,

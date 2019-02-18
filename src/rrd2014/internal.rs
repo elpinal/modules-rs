@@ -1193,53 +1193,52 @@ impl Term {
     /// ```
     /// use modules::rrd2014::internal::*;
     /// use Kind::*;
-    /// use Type::Int;
+    /// use Term::*;
     ///
     /// assert_eq!(
-    ///     Term::unpack(Term::Int(3), 0, Int, Term::Int(5)),
-    ///     Term::app(Term::abs(Int, Term::Int(5)), Term::Int(3))
+    ///     Term::unpack(Int(3), 0, Int(5)),
+    ///     Term::r#let(Int(3), Int(5))
     /// );
     ///
     /// assert_eq!(
-    ///     Term::unpack(Term::Int(3), 1, Int, Term::Int(5)),
+    ///     Term::unpack(Int(3), 1, Int(5)),
     ///     Term::Unpack(
-    ///         Box::new(Term::Int(3)),
-    ///         Box::new(Term::Int(5)),
+    ///         Box::new(Int(3)),
+    ///         Box::new(Int(5)),
     ///     )
     /// );
     ///
     /// assert_eq!(
-    ///     Term::unpack(Term::Int(3), 2, Int, Term::Int(5)),
+    ///     Term::unpack(Int(3), 2, Int(5)),
     ///     Term::Unpack(
-    ///         Box::new(Term::Int(3)),
+    ///         Box::new(Int(3)),
     ///         Box::new(
     ///             Term::Unpack(
     ///                 Box::new(Term::var(0)),
-    ///                 Box::new(Term::Int(5)),
+    ///                 Box::new(Int(5)),
     ///             )
     ///         )
     ///     )
     /// );
     ///
     /// assert_eq!(
-    ///     Term::unpack(Term::Int(3), 3, Type::Int, Term::Int(5)),
+    ///     Term::unpack(Int(3), 3, Int(5)),
     ///     Term::Unpack(
-    ///         Box::new(Term::Int(3)),
+    ///         Box::new(Int(3)),
     ///         Box::new(
     ///             Term::Unpack(
     ///                 Box::new(Term::var(0)),
     ///                 Box::new(
     ///                     Term::Unpack(
     ///                         Box::new(Term::var(0)),
-    ///                         Box::new(Term::Int(5)),
+    ///                         Box::new(Int(5)),
     ///                     )
     ///                 )
     ///             )
     ///         )
     ///     )
     /// );
-    pub fn unpack(t1: Term, n: usize, _ty: Type, t2: Term) -> Self {
-        // TODO: remove parameter `_ty`.
+    pub fn unpack(t1: Term, n: usize, t2: Term) -> Self {
         let mut t = t2;
         for _ in 1..n {
             t = Term::Unpack(Box::new(Term::var(0)), Box::new(t));
