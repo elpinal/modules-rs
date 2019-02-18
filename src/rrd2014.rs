@@ -154,7 +154,7 @@ pub enum TypeError {
     IllKinded(Type, internal::NotMonoError),
 
     #[fail(display = "{}", _0)]
-    Atomic(SemanticSigError), // TODO: rename Atomic -> SemanticSigError
+    SemanticSigError(SemanticSigError),
 
     #[fail(display = "duplicate label: {:?}", _0)]
     DuplicateLabel(Label),
@@ -186,7 +186,7 @@ impl From<EnvError> for TypeError {
 
 impl From<SemanticSigError> for TypeError {
     fn from(e: SemanticSigError) -> Self {
-        TypeError::Atomic(e)
+        TypeError::SemanticSigError(e)
     }
 }
 
@@ -1210,7 +1210,9 @@ impl SemanticSig {
             SemanticSig::StructureSig(ref m) => m
                 .get(&id.into())
                 .ok_or_else(|| TypeError::MissingLabel(id.into())),
-            _ => Err(TypeError::Atomic(SemanticSigError::Structure(self.clone()))),
+            _ => Err(TypeError::SemanticSigError(SemanticSigError::Structure(
+                self.clone(),
+            ))),
         }
     }
 
