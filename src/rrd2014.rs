@@ -1233,6 +1233,10 @@ impl Sig {
     fn fun(id: Ident, sig1: Sig, sig2: Sig) -> Self {
         Sig::Fun(id, Box::new(sig1), Box::new(sig2))
     }
+
+    fn r#where(sig: Sig, p: Proj<Ident>, ty: Type) -> Self {
+        Sig::Where(Box::new(sig), p, ty)
+    }
 }
 
 impl Module {

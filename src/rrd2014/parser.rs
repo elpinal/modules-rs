@@ -535,7 +535,7 @@ impl Parser {
         Some(Decl::Include(sig))
     }
 
-    fn signature(&mut self) -> Option<Sig> {
+    fn signature_atom(&mut self) -> Option<Sig> {
         match self.peek()?.kind {
             TokenKind::Sig => {
                 self.proceed();
@@ -567,6 +567,25 @@ impl Parser {
                 Some(Sig::fun(id, sig1, sig2))
             }
             _ => None,
+        }
+    }
+
+    fn signature(&mut self) -> Option<Sig> {
+        let sig = self.signature_atom()?;
+        if self.peek_expect(TokenKind::Where) {
+            self.proceed();
+            self.expect(TokenKind::Type)?;
+            let root = self.ident()?;
+            let mut v = Vec::new();
+            while self.peek_expect(TokenKind::Dot) {
+                self.proceed();
+                v.push(self.ident()?);
+            }
+            self.expect(TokenKind::Equal)?;
+            let ty = self.r#type()?;
+            Some(Sig::r#where(sig, Proj(root, v), ty))
+        } else {
+            Some(sig)
         }
     }
 
