@@ -639,7 +639,25 @@ impl Elaboration for Binding {
                     s,
                 ))
             }
-            _ => unimplemented!(),
+            Signature(ref id, ref sig) => {
+                let (asig, s) = sig.elaborate(env)?;
+                Ok((
+                    ITerm::record(Some((
+                        Label::from(id),
+                        SemanticTerm::Sig(asig.clone()).into(),
+                    ))),
+                    Existential::from(HashMap::from_iter(Some((
+                        Label::from(id),
+                        SemanticSig::AtomicSig(Box::new(asig)),
+                    )))),
+                    s,
+                ))
+            }
+            Include(ref m) => {
+                let (t, asig, s) = m.elaborate(env)?;
+                let ex = asig.try_map::<_, _, TypeError, _>(|ssig| ssig.get_structure())?;
+                Ok((t, ex, s))
+            }
         }
     }
 }
