@@ -673,12 +673,12 @@ impl Elaboration for Binding {
         match *self {
             Val(ref id, ref e) => {
                 let (t, ty, s) = e.elaborate(env)?;
-                let scheme = ty.close(env);
+                let (scheme, s1, ks) = ty.close(env);
+                let mut t = ITerm::from(SemanticTerm::Term(t));
+                t.shift(isize::try_from(ks.len()).unwrap());
+                t.apply(&s1);
                 Ok((
-                    ITerm::record(vec![(
-                        Label::from(id.clone()),
-                        SemanticTerm::Term(t).into(),
-                    )]),
+                    ITerm::record(vec![(Label::from(id.clone()), ITerm::poly(ks, t))]),
                     Existential::from(HashMap::from_iter(vec![(
                         Label::from(id.clone()),
                         AtomicTerm(scheme),

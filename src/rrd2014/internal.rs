@@ -212,6 +212,52 @@ impl Shift for Kind {
     fn shift_above(&mut self, _: usize, _: isize) {}
 }
 
+impl<T: Shift> Shift for Record<T> {
+    fn shift_above(&mut self, c: usize, d: isize) {
+        self.0.values_mut().for_each(|x| x.shift_above(c, d))
+    }
+}
+
+impl Shift for Term {
+    fn shift_above(&mut self, c: usize, d: isize) {
+        use Term::*;
+        match *self {
+            Var(_) | Int(_) => (),
+            Abs(ref mut ty, ref mut t) => {
+                ty.shift_above(c, d);
+                t.shift_above(c, d);
+            }
+            App(ref mut t1, ref mut t2) => {
+                t1.shift_above(c, d);
+                t2.shift_above(c, d);
+            }
+            Record(ref mut r) => r.shift_above(c, d),
+            Proj(ref mut t, _) => t.shift_above(c, d),
+            Poly(ref mut k, ref mut t) => {
+                k.shift_above(c + 1, d);
+                t.shift_above(c + 1, d);
+            }
+            Inst(ref mut t, ref mut ty) => {
+                t.shift_above(c, d);
+                ty.shift_above(c, d);
+            }
+            Pack(ref mut ty1, ref mut t, ref mut ty2) => {
+                ty1.shift_above(c, d);
+                t.shift_above(c, d);
+                ty2.shift_above(c + 1, d);
+            }
+            Unpack(ref mut t1, ref mut t2) => {
+                t1.shift_above(c, d);
+                t2.shift_above(c + 1, d);
+            }
+            Let(ref mut t1, ref mut t2) => {
+                t1.shift_above(c, d);
+                t2.shift_above(c, d);
+            }
+        }
+    }
+}
+
 impl<T: Shift> Shift for Box<T> {
     fn shift_above(&mut self, c: usize, d: isize) {
         (**self).shift_above(c, d)
@@ -952,7 +998,7 @@ impl Type {
         }
     }
 
-    pub fn close<T, S>(mut self, env: &Env<T, S>) -> Self
+    pub fn close<T, S>(mut self, env: &Env<T, S>) -> (Self, Subst, Vec<Kind>)
     where
         T: Fgtv,
         S: Clone + Default,
@@ -962,15 +1008,16 @@ impl Type {
         let tvs: Vec<_> = tvs.difference(&env_tvs).collect();
         let n = tvs.len();
         self.shift(isize::try_from(n).unwrap());
-        self.apply(&Subst::from_iter(
+        let s = Subst::from_iter(
             tvs.iter()
                 .enumerate()
                 .map(|(i, &&v)| (Variable::Generated(v), Type::var(i))),
-        ));
+        );
+        self.apply(&s);
         let ks = tvs
             .into_iter()
             .map(|&v| env.lookup_type(Variable::Generated(v)).unwrap().0);
-        Type::forall(ks, self)
+        (Type::forall(ks.clone(), self), s, ks.collect())
     }
 }
 
@@ -2183,24 +2230,30 @@ mod tests {
 
         let mut env = <Env<Type, ()>>::default();
 
-        assert_eq!(Int.close(&env), Int);
-        assert_eq!(Type::var(0).close(&env), Type::var(0));
+        macro_rules! close {
+            ($x:expr) => {
+                $x.close(&env).0
+            };
+        }
+
+        assert_eq!(close!(Int), Int);
+        assert_eq!(close!(Type::var(0)), Type::var(0));
 
         let v = env.fresh_type_variable(Mono);
 
-        assert_eq!(Var(v).close(&env), Type::forall(vec![Mono], Type::var(0)));
-        assert_eq!(Type::var(0).close(&env), Type::var(0));
+        assert_eq!(close!(Var(v)), Type::forall(vec![Mono], Type::var(0)));
+        assert_eq!(close!(Type::var(0)), Type::var(0));
         assert_eq!(
-            Type::fun(Var(v), Type::var(0)).close(&env),
+            close!(Type::fun(Var(v), Type::var(0))),
             Type::forall(vec![Mono], Type::fun(Type::var(0), Type::var(1)))
         );
 
         env.insert_value(Name::from("a"), Type::Var(v));
 
-        assert_eq!(Var(v).close(&env), Var(v));
-        assert_eq!(Type::var(0).close(&env), Type::var(0));
+        assert_eq!(close!(Var(v)), Var(v));
+        assert_eq!(close!(Type::var(0)), Type::var(0));
         assert_eq!(
-            Type::fun(Var(v), Type::var(0)).close(&env),
+            close!(Type::fun(Var(v), Type::var(0))),
             Type::fun(Var(v), Type::var(0))
         );
     }
