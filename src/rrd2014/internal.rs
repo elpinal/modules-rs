@@ -1487,8 +1487,14 @@ impl<T, S> Env<T, S> {
         self.venv.push(Some(x));
     }
 
-    pub fn insert_dummy_value(&mut self) {
+    fn insert_dummy_value(&mut self) {
         self.venv.push(None);
+    }
+
+    pub fn insert_dummy_values(&mut self, n: usize) {
+        for _ in 0..n {
+            self.insert_dummy_value();
+        }
     }
 
     pub fn drop_values_state(&mut self, n: usize, state: EnvState) {

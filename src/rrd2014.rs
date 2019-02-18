@@ -656,17 +656,17 @@ impl Elaboration for Module {
                 let enter_state = env.get_state();
                 for b in bs {
                     let (t, ex, s) = b.elaborate(env)?;
-                    n += 1;
+                    let len = ex.0.qs.len();
+                    n += if len == 0 { 1 } else { len };
                     let n0 = n;
                     ret_subst = ret_subst.compose(s.clone());
                     body.apply(&s);
                     v.apply(&s);
                     env.insert_types(ex.0.qs.clone().into_iter().map(|(k, s)| (k, Some(s))));
-                    env.insert_dummy_value();
+                    env.insert_dummy_values(if len == 0 { 1 } else { len });
                     qs.extend(ex.0.qs.clone());
                     body.extend(ex.0.body.clone());
                     let mut w = Vec::new();
-                    let len = ex.0.qs.len();
                     for (i, (l, ssig)) in ex.0.body.into_iter().enumerate() {
                         ls.insert(l.clone(), n0);
                         w.push(ITerm::proj(ITerm::var(i), Some(l.clone())));
