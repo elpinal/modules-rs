@@ -1019,6 +1019,29 @@ impl Type {
             .map(|&v| env.lookup_type(Variable::Generated(v)).unwrap().0);
         (Type::forall(ks.clone(), self), s, ks.collect())
     }
+
+    pub fn new_instance<T, S>(self, env: &mut Env<T, S>) -> (Self, Vec<Type>)
+    where
+        T: Shift,
+    {
+        let mut ty0 = self;
+        let mut tys = Vec::new();
+        loop {
+            match ty0 {
+                Type::Forall(k, ty) => {
+                    let v = env.fresh_type_variable(k);
+                    tys.push(Type::Var(v));
+                    ty0 = *ty;
+                }
+                mut ty => {
+                    let s = Subst::from_iter((0..tys.len()).rev().map(V).zip(tys.clone()));
+                    ty.apply(&s);
+                    ty.shift(-isize::try_from(tys.len()).unwrap());
+                    return (ty, tys);
+                }
+            }
+        }
+    }
 }
 
 impl Term {
