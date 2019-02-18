@@ -371,6 +371,12 @@ impl<T: Substitution, S> Substitution for Env<T, S> {
     }
 }
 
+impl Fgtv for Kind {
+    fn fgtv(&self) -> HashSet<usize> {
+        HashSet::default()
+    }
+}
+
 impl Fgtv for Type {
     fn fgtv(&self) -> HashSet<usize> {
         self.ftv()

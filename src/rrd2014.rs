@@ -8,12 +8,14 @@ pub mod internal;
 pub mod parser;
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::iter::FromIterator;
 
 use failure::Fail;
 
 use internal::EnvError;
+use internal::Fgtv;
 use internal::Kind as IKind;
 use internal::Shift;
 use internal::Term as ITerm;
@@ -345,6 +347,55 @@ impl Shift for SemanticSig {
     }
 }
 
+impl<T: Fgtv> Fgtv for Box<T> {
+    fn fgtv(&self) -> HashSet<usize> {
+        (**self).fgtv()
+    }
+}
+
+impl<T: Fgtv> Fgtv for Quantified<T> {
+    fn fgtv(&self) -> HashSet<usize> {
+        self.body.fgtv()
+    }
+}
+
+impl<T: Fgtv> Fgtv for Existential<T> {
+    fn fgtv(&self) -> HashSet<usize> {
+        self.0.fgtv()
+    }
+}
+
+impl<T: Fgtv> Fgtv for Universal<T> {
+    fn fgtv(&self) -> HashSet<usize> {
+        self.0.fgtv()
+    }
+}
+
+impl Fgtv for Fun {
+    fn fgtv(&self) -> HashSet<usize> {
+        let mut s = self.0.fgtv();
+        s.extend(self.1.fgtv());
+        s
+    }
+}
+
+impl Fgtv for SemanticSig {
+    fn fgtv(&self) -> HashSet<usize> {
+        use SemanticSig::*;
+        match *self {
+            AtomicTerm(ref ty) => ty.fgtv(),
+            AtomicType(ref ty, ref k) => {
+                let mut s = ty.fgtv();
+                s.extend(k.fgtv());
+                s
+            }
+            AtomicSig(ref asig) => asig.fgtv(),
+            StructureSig(ref m) => m.values().flat_map(|ssig| ssig.fgtv()).collect(),
+            FunctorSig(ref u) => u.fgtv(),
+        }
+    }
+}
+
 trait Elaboration {
     type Output;
     type Error;
@@ -622,6 +673,7 @@ impl Elaboration for Binding {
         match *self {
             Val(ref id, ref e) => {
                 let (t, ty, s) = e.elaborate(env)?;
+                let scheme = ty.close(env);
                 Ok((
                     ITerm::record(vec![(
                         Label::from(id.clone()),
@@ -629,7 +681,7 @@ impl Elaboration for Binding {
                     )]),
                     Existential::from(HashMap::from_iter(vec![(
                         Label::from(id.clone()),
-                        AtomicTerm(ty),
+                        AtomicTerm(scheme),
                     )])),
                     s,
                 ))
