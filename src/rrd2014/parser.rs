@@ -677,7 +677,7 @@ impl Parser {
                 let id = self.ident()?;
                 self.expect(TokenKind::Colon)?;
                 let sig = self.signature()?;
-                self.expect(TokenKind::Arrow)?;
+                self.expect(TokenKind::DoubleArrow)?;
                 let m = self.module()?;
                 Some(Module::fun(id, sig, m))
             }
