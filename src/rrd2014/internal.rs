@@ -388,6 +388,7 @@ impl Substitution for Term {
             Pack(ref mut ty1, ref mut t, ref mut ty2) => {
                 ty1.apply(s);
                 t.apply(s);
+                let s = &s.clone().shift(1);
                 ty2.apply(s);
             }
             Unpack(ref mut t1, ref mut t2) => {
@@ -397,7 +398,6 @@ impl Substitution for Term {
             }
             Let(ref mut t1, ref mut t2) => {
                 t1.apply(s);
-                let s = &s.clone().shift(1);
                 t2.apply(s);
             }
         }
