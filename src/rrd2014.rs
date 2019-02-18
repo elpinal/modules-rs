@@ -1182,7 +1182,8 @@ impl Expr {
             Path(ref p) => {
                 let (t, ssig, s) = p.elaborate(env)?;
                 let ty = ssig.get_atomic_term()?;
-                Ok((t, ty, s))
+                let (ty, tys) = ty.new_instance(env);
+                Ok((ITerm::inst(t, tys), ty, s))
             }
         }
     }
@@ -1704,7 +1705,10 @@ mod tests {
                 (l("y"), SemanticSig::AtomicTerm(IType::Int)),
                 (
                     l("f"),
-                    SemanticSig::AtomicTerm(IType::fun(IType::Int, IType::Int))
+                    SemanticSig::AtomicTerm(IType::forall(
+                        vec![IKind::Mono],
+                        IType::fun(IType::var(0), IType::var(0))
+                    ))
                 ),
             ])))
         );

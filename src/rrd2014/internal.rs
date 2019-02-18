@@ -425,13 +425,28 @@ impl Fgtv for Kind {
 
 impl Fgtv for Type {
     fn fgtv(&self) -> HashSet<usize> {
-        self.ftv()
-            .into_iter()
-            .filter_map(|v| match v {
-                V(_) => None,
-                Variable::Generated(n) => Some(n),
-            })
-            .collect()
+        use Type::*;
+        match *self {
+            Var(Variable::Generated(n)) => HashSet::from_iter(vec![n]),
+            Var(_) | Int => HashSet::new(),
+            Fun(ref ty1, ref ty2) => {
+                let mut s = ty1.fgtv();
+                s.extend(ty2.fgtv());
+                s
+            }
+            Record(ref r) => r.0.values().flat_map(|ty| ty.fgtv()).collect(),
+            App(ref ty1, ref ty2) => {
+                let mut s = ty1.fgtv();
+                s.extend(ty2.fgtv());
+                s
+            }
+            Forall(ref k, ref ty) => {
+                let mut s = k.fgtv();
+                s.extend(ty.fgtv());
+                s
+            }
+            _ => unimplemented!(),
+        }
     }
 }
 
