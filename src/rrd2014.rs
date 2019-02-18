@@ -1424,6 +1424,7 @@ mod tests {
     fn elaborate_binding() {
         use super::Type as T;
         use Binding::*;
+        use IKind::*;
         use SemanticSig::*;
 
         assert_elaborate_ok_2!(
@@ -1442,11 +1443,14 @@ mod tests {
             (
                 ITerm::record(vec![(
                     Label::from("x"),
-                    ITerm::abs(IType::generated_var(0), ITerm::Int(22))
+                    ITerm::poly(vec![Mono], ITerm::abs(IType::var(0), ITerm::Int(22)))
                 )]),
                 Existential::from(HashMap::from_iter(vec![(
                     Label::from("x"),
-                    AtomicTerm(IType::fun(IType::generated_var(0), IType::Int))
+                    AtomicTerm(IType::forall(
+                        vec![Mono],
+                        IType::fun(IType::var(0), IType::Int)
+                    ))
                 )]))
             )
         );
