@@ -531,7 +531,7 @@ impl Variable {
         }
     }
 
-    fn get_index(self) -> usize {
+    pub fn get_index(self) -> usize {
         match self {
             V(n) => n,
             Variable::Generated(n) => panic!("get_index: unexpected generated variable: {}", n),
@@ -588,7 +588,7 @@ impl Kind {
         true
     }
 
-    fn equal(&self, k: &Kind) -> bool {
+    pub fn equal(&self, k: &Kind) -> bool {
         self == k
     }
 }

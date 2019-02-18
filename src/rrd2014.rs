@@ -154,7 +154,7 @@ pub enum TypeError {
     IllKinded(Type, internal::NotMonoError),
 
     #[fail(display = "{}", _0)]
-    Atomic(SemanticSigError),
+    Atomic(SemanticSigError), // TODO: rename Atomic -> SemanticSigError
 
     #[fail(display = "duplicate label: {:?}", _0)]
     DuplicateLabel(Label),
@@ -170,6 +170,12 @@ pub enum TypeError {
 
     #[fail(display = "{:?} is not sub-signature of {:?}", _0, _1)]
     NotSubsignature(SemanticSig, SemanticSig),
+
+    #[fail(display = "not local abstract type: {:?}", _0)]
+    NotLocalAbstractType(internal::Variable),
+
+    #[fail(display = "not abstract type: {:?}", _0)]
+    NotAbstractType(IType),
 }
 
 impl From<EnvError> for TypeError {
@@ -577,7 +583,31 @@ impl Elaboration for Sig {
                     s1.compose(s2),
                 ))
             }
-            _ => unimplemented!(),
+            Where(ref sig, ref p, ref ty) => {
+                let (asig, s1) = sig.elaborate(env)?;
+                let (mut ty, k1, s2) = ty.elaborate(env)?;
+                // TODO: `asig.apply(&s2)`?
+                let (ty0, k2) = asig.0.body.proj_multi(p)?.clone().get_atomic_type()?;
+                match ty0 {
+                    IType::Var(v) if v.get_index() >= asig.0.qs.len() => {
+                        Err(TypeError::NotLocalAbstractType(v))
+                    }
+                    IType::Var(v) if k1.equal(&k2) => {
+                        let mut qs = asig.0.qs;
+                        ty.shift(isize::try_from(qs.len()).unwrap());
+                        qs.remove(qs.len() - v.get_index() - 1);
+                        let mut body = asig.0.body;
+                        body.apply(&Subst::from_iter(Some((v, ty))));
+                        body.shift_above(v.get_index(), -1);
+                        Ok((Existential(Quantified { qs, body }), s1.compose(s2)))
+                    }
+                    IType::Var(_) => Err(TypeError::KindError(internal::KindError::KindMismatch(
+                        k1.clone(),
+                        k2.clone(),
+                    ))),
+                    _ => Err(TypeError::NotAbstractType(ty0)),
+                }
+            }
         }
     }
 }
@@ -1173,6 +1203,23 @@ impl SemanticSig {
         ssig.shift(-ni);
         let t = self.subtype_of(env, &ssig)?;
         Ok((t, tys))
+    }
+
+    fn proj(&self, id: &Ident) -> Result<&SemanticSig, TypeError> {
+        match *self {
+            SemanticSig::StructureSig(ref m) => m
+                .get(&id.into())
+                .ok_or_else(|| TypeError::MissingLabel(id.into())),
+            _ => Err(TypeError::Atomic(SemanticSigError::Structure(self.clone()))),
+        }
+    }
+
+    fn proj_multi(&self, p: &Proj<Ident>) -> Result<&SemanticSig, TypeError> {
+        let mut ssig = self.proj(&p.0)?;
+        for id in p.1.iter() {
+            ssig = ssig.proj(id)?;
+        }
+        Ok(ssig)
     }
 }
 
