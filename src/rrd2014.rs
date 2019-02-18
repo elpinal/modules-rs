@@ -371,6 +371,9 @@ pub enum SemanticSigError {
 
     #[fail(display = "not structure signature: {:?}", _0)]
     Structure(SemanticSig),
+
+    #[fail(display = "not functor signature: {:?}", _0)]
+    Functor(SemanticSig),
 }
 
 impl SemanticSig {
@@ -416,6 +419,13 @@ impl SemanticSig {
         match self {
             SemanticSig::StructureSig(m) => Ok(m),
             _ => Err(SemanticSigError::Structure(self)),
+        }
+    }
+
+    fn get_functor(self) -> Result<Universal<Fun>, SemanticSigError> {
+        match self {
+            SemanticSig::FunctorSig(u) => Ok(u.map(|f| *f)),
+            _ => Err(SemanticSigError::Functor(self)),
         }
     }
 }
@@ -756,7 +766,32 @@ impl Elaboration for Module {
                     s1.compose(s2),
                 ))
             }
-            _ => unimplemented!(),
+            App(ref id1, ref id2) => {
+                let (ssig1, v1) = env.lookup_value_by_name(id1.into())?;
+                let (ssig2, v2) = env.lookup_value_by_name(id2.into())?;
+                let u = ssig1.get_functor()?;
+                let self::Fun(ssig1, mut asig1) = u.0.body;
+                let len = u.0.qs.len();
+                let (t, tys) = ssig2.r#match(
+                    env,
+                    &Existential(Quantified {
+                        qs: u.0.qs,
+                        body: ssig1,
+                    }),
+                )?;
+                let s =
+                    Subst::from_iter((0..len).rev().map(internal::Variable::new).zip(tys.clone()));
+                // TODO: This may be wrong.
+                asig1.apply(&s);
+                Ok((
+                    ITerm::app(
+                        ITerm::inst(ITerm::Var(v1), tys),
+                        ITerm::app(t, ITerm::Var(v2)),
+                    ),
+                    asig1,
+                    Subst::default(),
+                ))
+            }
         }
     }
 }
