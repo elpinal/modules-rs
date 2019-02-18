@@ -874,6 +874,14 @@ impl Subtype for SemanticSig {
                     ITerm::var(0),
                 ))
             }
+            (&AtomicSig(ref asig1), &AtomicSig(ref asig2)) => {
+                let _ = asig1.subtype_of(env, asig2)?;
+                let _ = asig2.subtype_of(env, asig1)?;
+                Ok(ITerm::abs(
+                    AtomicSig(asig1.clone()).into(),
+                    SemanticTerm::Sig(*asig2.clone()).into(),
+                ))
+            }
             (&StructureSig(ref m1), &StructureSig(ref m2)) => {
                 let mut m = HashMap::new();
                 for (l, ssig2) in m2.iter() {
