@@ -4,7 +4,7 @@ This repository contains an interpreter of F-ing modules in Rust.
 
 ## Install
 
-Use Rust nightly.
+Use nightly releases of Rust.
 
 ```
 $ cargo install --git https://github.com/elpinal/modules-rs
