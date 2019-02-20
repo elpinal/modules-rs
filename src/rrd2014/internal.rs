@@ -467,12 +467,12 @@ impl Fgtv for Type {
                 s.extend(ty2.fgtv());
                 s
             }
-            Forall(ref k, ref ty) => {
+            Forall(ref k, ref ty) | Some(ref k, ref ty) => {
                 let mut s = k.fgtv();
                 s.extend(ty.fgtv());
                 s
             }
-            _ => unimplemented!(),
+            _ => unimplemented!("{:?}", self),
         }
     }
 }
