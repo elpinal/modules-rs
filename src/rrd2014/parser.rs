@@ -699,12 +699,19 @@ impl Parser {
                 self.proceed();
                 let mut v = Vec::new();
                 let mut state = self.save();
-                while let Ok(decl) = self.decl() {
-                    v.push(decl);
-                    state = self.save();
+                loop {
+                    match self.decl() {
+                        Ok(decl) => {
+                            v.push(decl);
+                            state = self.save();
+                        }
+                        Err(e) => {
+                            self.restore(state);
+                            self.expect(TokenKind::End).map_err(|_| e)?;
+                            break;
+                        }
+                    }
                 }
-                self.restore(state);
-                self.expect(TokenKind::End)?;
                 Ok(Sig::Seq(v))
             }
             TokenKind::Ident(_) => {
@@ -851,12 +858,19 @@ impl Parser {
                 self.proceed();
                 let mut v = Vec::new();
                 let mut state = self.save();
-                while let Ok(binding) = self.binding() {
-                    v.push(binding);
-                    state = self.save();
+                loop {
+                    match self.binding() {
+                        Ok(binding) => {
+                            v.push(binding);
+                            state = self.save();
+                        }
+                        Err(e) => {
+                            self.restore(state);
+                            self.expect(TokenKind::End).map_err(|_| e)?;
+                            break;
+                        }
+                    }
                 }
-                self.restore(state);
-                self.expect(TokenKind::End)?;
                 Ok(Module::Seq(v))
             }
             TokenKind::Fun => {
