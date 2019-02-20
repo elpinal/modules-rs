@@ -1504,7 +1504,7 @@ impl Term {
                             let ty0 = t.type_of(ctx)?;
                             let mut ty = *ty.clone();
                             ty.subst_top(&mut ty1.clone());
-                            if ty0 == ty {
+                            if ty0.equal(&ty) {
                                 Ok(ty2.clone())
                             } else {
                                 Err(TypeError::TypeMismatch(ty0, ty))
