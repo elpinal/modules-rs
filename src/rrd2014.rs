@@ -37,6 +37,10 @@ pub enum Kind {
 pub enum Type {
     Fun(Box<Type>, Box<Type>),
     Path(Path),
+
+    /// A package type.
+    Pack(Box<Sig>),
+
     Int,
 }
 
@@ -528,6 +532,10 @@ impl Elaboration for Type {
                 let (_, ssig, s) = p.elaborate(env)?;
                 let (ty, k) = ssig.get_atomic_type()?;
                 Ok((ty, k, s))
+            }
+            Pack(ref sig) => {
+                let (asig, s) = sig.elaborate(env)?;
+                Ok((IType::from(asig.normalize()), IKind::Mono, s))
             }
         }
     }
@@ -1245,6 +1253,10 @@ impl Type {
 
     fn path(m: Module) -> Self {
         Type::Path(Path::from(m))
+    }
+
+    fn pack(sig: Sig) -> Self {
+        Type::Pack(Box::new(sig))
     }
 }
 
