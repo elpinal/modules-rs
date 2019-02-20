@@ -1,10 +1,11 @@
-use std::io;
 use std::io::Read;
 use std::iter::FromIterator;
 use std::iter::Peekable;
 use std::vec::IntoIter;
 
+use failure::err_msg;
 use failure::Fail;
+use failure::Fallible;
 
 use super::*;
 
@@ -71,8 +72,17 @@ struct State(Peekable<IntoIter<Token>>);
 
 #[derive(Debug, Fail, PartialEq)]
 enum LexError {
+    #[fail(display = "no token")]
+    NoToken,
+
     #[fail(display = "unexpected end of file: line {}, column {}", _0, _1)]
     UnexpectedEOF(usize, usize),
+
+    #[fail(display = "{}:{}: illegal character: {:?}", _0, _1, _2)]
+    IllegalCharacter(usize, usize, char),
+
+    #[fail(display = "{}:{}: expected {:?}, but found {:?}", _0, _1, _2, _3)]
+    Expected(usize, usize, char, char),
 }
 
 type Res<T> = Result<T, LexError>;
@@ -132,8 +142,8 @@ impl Lexer {
         }
     }
 
-    fn peek(&mut self) -> Option<char> {
-        self.src.peek().cloned()
+    fn peek(&mut self) -> Res<char> {
+        self.src.peek().cloned().ok_or(LexError::NoToken)
     }
 
     fn pos(&self) -> Position {
@@ -150,12 +160,12 @@ impl Lexer {
         }
     }
 
-    fn lex(&mut self) -> Option<Token> {
+    fn lex(&mut self) -> Res<Token> {
         macro_rules! proceeding {
             ($token:expr) => {{
                 let token = $token;
                 self.proceed();
-                Some(token)
+                Ok(token)
             }};
         };
 
@@ -184,66 +194,67 @@ impl Lexer {
             '\u{03bb}' => proceeding!(self.token(TokenKind::Lambda)),
             ch if ch.is_ascii_digit() => self.int(),
             ch if ch.is_ascii_alphabetic() => self.ident(),
-            _ => None,
+            ch => Err(LexError::IllegalCharacter(self.line, self.column, ch)),
         }
     }
 
-    fn arrow(&mut self, pos: Position) -> Option<Token> {
-        match self.next_opt()? {
-            '>' => Some(Token {
+    fn arrow(&mut self, pos: Position) -> Res<Token> {
+        match self.next_opt() {
+            Some('>') => Ok(Token {
                 kind: TokenKind::Arrow,
                 pos,
             }),
-            _ => None,
+            Some(ch) => Err(LexError::Expected(self.line, self.column, '>', ch)),
+            None => Err(LexError::UnexpectedEOF(self.line, self.column)),
         }
     }
 
-    fn double_arrow(&mut self, pos: Position) -> Option<Token> {
+    fn double_arrow(&mut self, pos: Position) -> Res<Token> {
         macro_rules! proceeding {
             ($token:expr) => {{
                 let token = $token;
                 self.proceed();
-                Some(token)
+                Ok(token)
             }};
         };
 
         match self.peek() {
-            Some('>') => proceeding!(Token {
+            Ok('>') => proceeding!(Token {
                 kind: TokenKind::DoubleArrow,
                 pos,
             }),
-            _ => Some(Token {
+            _ => Ok(Token {
                 kind: TokenKind::Equal,
                 pos,
             }),
         }
     }
 
-    fn colon(&mut self, pos: Position) -> Option<Token> {
+    fn colon(&mut self, pos: Position) -> Res<Token> {
         macro_rules! proceeding {
             ($token:expr) => {{
                 let token = $token;
                 self.proceed();
-                Some(token)
+                Ok(token)
             }};
         };
 
         match self.peek() {
-            Some('>') => proceeding!(Token {
+            Ok('>') => proceeding!(Token {
                 kind: TokenKind::OpaqueSealing,
                 pos,
             }),
-            _ => Some(Token {
+            _ => Ok(Token {
                 kind: TokenKind::Colon,
                 pos,
             }),
         }
     }
 
-    fn ident(&mut self) -> Option<Token> {
+    fn ident(&mut self) -> Res<Token> {
         let pos = self.pos();
         let mut v = Vec::new();
-        while let Some(ch) = self.peek() {
+        while let Ok(ch) = self.peek() {
             if ch.is_ascii_alphanumeric() || ch == '_' {
                 v.push(ch);
                 self.proceed();
@@ -252,13 +263,13 @@ impl Lexer {
             }
         }
         let kind = keyword_or_ident(String::from_iter(v));
-        Some(Token { kind, pos })
+        Ok(Token { kind, pos })
     }
 
-    fn int(&mut self) -> Option<Token> {
+    fn int(&mut self) -> Res<Token> {
         let pos = self.pos();
         let mut n = 0;
-        while let Some(ch) = self.peek() {
+        while let Ok(ch) = self.peek() {
             if ch.is_ascii_digit() {
                 n = n * 10 + ch.to_digit(10).unwrap() as isize;
             } else if ch != '_' {
@@ -266,18 +277,21 @@ impl Lexer {
             }
             self.proceed();
         }
-        Some(Token {
+        Ok(Token {
             kind: TokenKind::IntLit(n),
             pos,
         })
     }
 
-    fn lex_all(&mut self) -> Vec<Token> {
+    fn lex_all(&mut self) -> Res<Vec<Token>> {
         let mut v = Vec::new();
-        while let Some(token) = self.lex() {
-            v.push(token);
+        loop {
+            match self.lex() {
+                Ok(token) => v.push(token),
+                Err(LexError::NoToken) => return Ok(v),
+                Err(e) => return Err(e),
+            }
         }
-        v
     }
 }
 
@@ -737,17 +751,17 @@ impl Parser {
     }
 }
 
-fn parse<I>(src: I) -> Option<Module>
+fn parse<I>(src: I) -> Fallible<Module>
 where
     I: IntoIterator<Item = char>,
 {
     let mut l = Lexer::new(src.into_iter().collect());
-    let tokens = l.lex_all();
+    let tokens = l.lex_all()?;
     let mut p = Parser::new(tokens);
-    p.module()
+    p.module().ok_or_else(|| err_msg("parse error"))
 }
 
-pub fn parse_file<P>(filename: P) -> io::Result<Option<Module>>
+pub fn parse_file<P>(filename: P) -> Fallible<Module>
 where
     P: AsRef<std::path::Path>,
 {
@@ -755,7 +769,7 @@ where
     let mut s = String::new();
     let mut f = File::open(filename)?;
     f.read_to_string(&mut s)?;
-    Ok(parse(s.chars()))
+    parse(s.chars())
 }
 
 #[cfg(test)]
@@ -769,7 +783,7 @@ mod tests {
         let mut l = Lexer::new(vec!['λ']);
         assert_eq!(
             l.lex(),
-            Some(Token {
+            Ok(Token {
                 kind: TokenKind::Lambda,
                 pos: Position { line: 0, column: 0 }
             })
@@ -781,7 +795,7 @@ mod tests {
         let mut l = Lexer::new(vec!['0', '1', '_', '9']);
         assert_eq!(
             l.lex(),
-            Some(Token {
+            Ok(Token {
                 kind: TokenKind::IntLit(19),
                 pos: Position { line: 0, column: 0 }
             })
@@ -794,7 +808,7 @@ mod tests {
 
         assert_eq!(
             l.lex(),
-            Some(Token {
+            Ok(Token {
                 kind: TokenKind::Struct,
                 pos: Position { line: 0, column: 0 }
             })
@@ -802,7 +816,7 @@ mod tests {
 
         assert_eq!(
             l.lex(),
-            Some(Token {
+            Ok(Token {
                 kind: TokenKind::End,
                 pos: Position { line: 0, column: 7 }
             })

@@ -135,7 +135,7 @@ fn parse<P>(file: P) -> Result<Module, Error>
 where
     P: AsRef<std::path::Path>,
 {
-    parser::parse_file(&file)?.ok_or_else(|| format_err!("parse error"))
+    parser::parse_file(&file)
 }
 
 fn elaborate(
