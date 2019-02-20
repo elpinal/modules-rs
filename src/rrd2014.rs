@@ -107,6 +107,7 @@ pub enum Decl {
     Include(Sig),
 }
 
+/// Just for error messages, i.e., irrelevant to the essential algorithm.
 #[derive(Clone, Debug, PartialEq)]
 struct StemFrom {
     id: Ident,
