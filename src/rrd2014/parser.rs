@@ -381,6 +381,13 @@ impl Parser {
         self.src.peek().cloned().ok_or(ParseError::UnexpectedEOF)
     }
 
+    fn expect_eof(&mut self) -> ParseRes<()> {
+        if let Some(token) = self.src.peek() {
+            Err(ParseError::expected("eof", token.clone()))?;
+        }
+        Ok(())
+    }
+
     fn kind(&mut self) -> ParseRes<Kind> {
         let token = self.next()?;
         match token.kind {
@@ -517,9 +524,12 @@ impl Parser {
             }
             _ => {
                 let mut e0 = self.expr_atom()?;
+                let mut state = self.save();
                 while let Ok(e) = self.expr_atom() {
                     e0 = Expr::app(e0, e);
+                    state = self.save();
                 }
+                self.restore(state);
                 Ok(e0)
             }
         }
@@ -616,9 +626,12 @@ impl Parser {
             TokenKind::Sig => {
                 self.proceed();
                 let mut v = Vec::new();
+                let mut state = self.save();
                 while let Ok(decl) = self.decl() {
                     v.push(decl);
+                    state = self.save();
                 }
+                self.restore(state);
                 self.expect(TokenKind::End)?;
                 Ok(Sig::Seq(v))
             }
@@ -765,9 +778,12 @@ impl Parser {
             TokenKind::Struct => {
                 self.proceed();
                 let mut v = Vec::new();
+                let mut state = self.save();
                 while let Ok(binding) = self.binding() {
                     v.push(binding);
+                    state = self.save();
                 }
+                self.restore(state);
                 self.expect(TokenKind::End)?;
                 Ok(Module::Seq(v))
             }
@@ -807,7 +823,9 @@ where
     let mut l = Lexer::new(src.into_iter().collect());
     let tokens = l.lex_all()?;
     let mut p = Parser::new(tokens);
-    Ok(p.module()?)
+    let m = p.module()?;
+    p.expect_eof()?;
+    Ok(m)
 }
 
 pub fn parse_file<P>(filename: P) -> Fallible<Module>
