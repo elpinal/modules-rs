@@ -1293,6 +1293,23 @@ impl SemanticSig {
             _ => None,
         }
     }
+
+    fn sort_quantifiers(&self, ks: Vec<IKind>) -> (Vec<IKind>, Subst) {
+        use internal::Variable::Variable;
+        let len = ks.len();
+        let mut xs: Vec<(IKind, usize)> = ks.into_iter().zip((0..len).rev()).collect();
+        xs.sort_unstable_by_key(|&(_, i)| self.first_apper(Variable(i)));
+        let ys = (0..)
+            .zip(xs)
+            .map(|(n, (k, i))| (k, (Variable(i), IType::var(n))));
+        let mut ks = VecDeque::new();
+        let mut m = HashMap::new();
+        for (k, (v, ty)) in ys {
+            ks.push_front(k);
+            m.insert(v, ty);
+        }
+        (Vec::from(ks), Subst::from_iter(m))
+    }
 }
 
 impl Sig {
@@ -2069,6 +2086,129 @@ mod tests {
             ])
             .first_apper(Variable(0)),
             Some(VecDeque::from(vec![l("a")]))
+        );
+    }
+
+    #[test]
+    fn sort_quantifiers() {
+        use internal::Variable::*;
+        use IKind as Kind;
+        use IKind::Mono;
+        use IType as Type;
+        use IType::Int;
+        use SemanticSig::*;
+
+        let l = Label::from;
+
+        assert_eq!(
+            AtomicTerm(Int).sort_quantifiers(vec![]),
+            (vec![], Subst::from_iter(vec![]))
+        );
+
+        assert_eq!(
+            AtomicType(Int, Mono).sort_quantifiers(vec![]),
+            (vec![], Subst::from_iter(vec![]))
+        );
+
+        assert_eq!(
+            AtomicType(Type::var(0), Mono).sort_quantifiers(vec![]),
+            (vec![], Subst::from_iter(vec![]))
+        );
+
+        assert_eq!(
+            AtomicType(Int, Mono).sort_quantifiers(vec![Mono]),
+            (
+                vec![Mono],
+                Subst::from_iter(vec![(Variable(0), Type::var(0))])
+            )
+        );
+
+        assert_eq!(
+            AtomicType(Type::var(0), Mono).sort_quantifiers(vec![Mono]),
+            (
+                vec![Mono],
+                Subst::from_iter(vec![(Variable(0), Type::var(0))])
+            )
+        );
+
+        assert_eq!(
+            AtomicType(Type::var(1), Mono).sort_quantifiers(vec![Mono]),
+            (
+                vec![Mono],
+                Subst::from_iter(vec![(Variable(0), Type::var(0))])
+            )
+        );
+
+        assert_eq!(
+            SemanticSig::structure_sig(vec![(l("a"), AtomicType(Type::var(0), Mono))])
+                .sort_quantifiers(vec![Mono]),
+            (
+                vec![Mono],
+                Subst::from_iter(vec![(Variable(0), Type::var(0))])
+            )
+        );
+
+        assert_eq!(
+            SemanticSig::structure_sig(vec![
+                (l("a"), AtomicType(Type::var(0), Mono)),
+                (l("b"), AtomicType(Type::var(1), Mono)),
+            ])
+            .sort_quantifiers(vec![Mono, Mono]),
+            (
+                vec![Mono, Mono],
+                Subst::from_iter(vec![
+                    (Variable(0), Type::var(0)),
+                    (Variable(1), Type::var(1)),
+                ])
+            )
+        );
+
+        assert_eq!(
+            SemanticSig::structure_sig(vec![
+                (l("b"), AtomicType(Type::var(0), Kind::fun(Mono, Mono))),
+                (l("a"), AtomicType(Type::var(1), Mono)),
+            ])
+            .sort_quantifiers(vec![Mono, Kind::fun(Mono, Mono)]),
+            (
+                vec![Kind::fun(Mono, Mono), Mono],
+                Subst::from_iter(vec![
+                    (Variable(0), Type::var(1)),
+                    (Variable(1), Type::var(0)),
+                ])
+            )
+        );
+
+        assert_eq!(
+            SemanticSig::structure_sig(vec![
+                (l("a"), AtomicType(Type::var(1), Kind::fun(Mono, Mono))),
+                (l("b"), AtomicType(Type::var(0), Mono)),
+                (l("c"), AtomicType(Type::var(1), Kind::fun(Mono, Mono))),
+            ])
+            .sort_quantifiers(vec![Kind::fun(Mono, Mono), Mono]),
+            (
+                vec![Mono, Kind::fun(Mono, Mono)],
+                Subst::from_iter(vec![
+                    (Variable(0), Type::var(1)),
+                    (Variable(1), Type::var(0)),
+                ])
+            )
+        );
+
+        assert_eq!(
+            SemanticSig::structure_sig(vec![
+                (l("a"), AtomicType(Type::var(2), Kind::fun(Mono, Mono))),
+                (l("b"), AtomicType(Type::var(0), Mono)),
+                (l("c"), AtomicType(Type::var(1), Mono)),
+            ])
+            .sort_quantifiers(vec![Kind::fun(Mono, Mono), Mono, Mono]),
+            (
+                vec![Mono, Mono, Kind::fun(Mono, Mono)],
+                Subst::from_iter(vec![
+                    (Variable(0), Type::var(1)),
+                    (Variable(1), Type::var(2)),
+                    (Variable(2), Type::var(0)),
+                ])
+            )
         );
     }
 }
