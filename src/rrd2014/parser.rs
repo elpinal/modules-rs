@@ -42,6 +42,9 @@ enum TokenKind {
     Sig,
     End,
 
+    Pack,
+    Unpack,
+
     Ident(String),
     IntLit(isize),
 }
@@ -291,6 +294,8 @@ fn keyword_or_ident(s: String) -> TokenKind {
         "struct" => TokenKind::Struct,
         "sig" => TokenKind::Sig,
         "end" => TokenKind::End,
+        "pack" => TokenKind::Pack,
+        "unpack" => TokenKind::Unpack,
         _ => TokenKind::Ident(s),
     }
 }
@@ -358,6 +363,11 @@ impl Parser {
                 let ty = self.r#type()?;
                 self.expect(TokenKind::RParen)?;
                 Some(ty)
+            }
+            TokenKind::Pack => {
+                self.proceed();
+                let sig = self.signature_atom()?;
+                Some(Type::pack(sig))
             }
             _ => None,
         }
@@ -442,6 +452,13 @@ impl Parser {
             TokenKind::Lambda => {
                 self.proceed();
                 self.abs()
+            }
+            TokenKind::Pack => {
+                self.proceed();
+                let m = self.module()?;
+                self.expect(TokenKind::Colon)?;
+                let sig = self.signature()?;
+                Some(Expr::pack(m, sig))
             }
             _ => {
                 let mut e0 = self.expr_atom()?;
@@ -699,6 +716,13 @@ impl Parser {
                 self.expect(TokenKind::DoubleArrow)?;
                 let m = self.module()?;
                 Some(Module::fun(id, sig, m))
+            }
+            TokenKind::Unpack => {
+                self.proceed();
+                let e = self.expr()?;
+                self.expect(TokenKind::Colon)?;
+                let sig = self.signature()?;
+                Some(Module::unpack(e, sig))
             }
             _ => {
                 let mut m0 = self.module_atom()?;
