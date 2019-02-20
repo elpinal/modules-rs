@@ -896,19 +896,19 @@ mod tests {
             kind: TokenKind::IntLit(33),
             pos: Default::default(),
         }]);
-        assert_eq!(p.expr_atom(), Some(Expr::Int(33)));
+        assert_eq!(p.expr_atom(), Ok(Expr::Int(33)));
 
         let mut p = Parser::new(vec![Token {
             kind: TokenKind::IntLit(33),
             pos: Default::default(),
         }]);
-        assert_eq!(p.expr(), Some(Expr::Int(33)));
+        assert_eq!(p.expr(), Ok(Expr::Int(33)));
 
         let mut p = Parser::new(vec![Token {
             kind: TokenKind::ident("a"),
             pos: Default::default(),
         }]);
-        assert_eq!(p.expr(), Some(Expr::path(Module::Ident(Ident::from("a")))));
+        assert_eq!(p.expr(), Ok(Expr::path(Module::Ident(Ident::from("a")))));
 
         let mut p = Parser::new(vec![
             Token {
@@ -922,7 +922,7 @@ mod tests {
         ]);
         assert_eq!(
             p.expr(),
-            Some(Expr::app(
+            Ok(Expr::app(
                 Expr::path(Module::Ident(Ident::from("a"))),
                 Expr::path(Module::Ident(Ident::from("a")))
             ))
@@ -935,22 +935,19 @@ mod tests {
             kind: TokenKind::Int,
             pos: Default::default(),
         }]);
-        assert_eq!(p.type_atom(), Some(Type::Int));
+        assert_eq!(p.type_atom(), Ok(Type::Int));
 
         let mut p = Parser::new(vec![Token {
             kind: TokenKind::Int,
             pos: Default::default(),
         }]);
-        assert_eq!(p.r#type(), Some(Type::Int));
+        assert_eq!(p.r#type(), Ok(Type::Int));
 
         let mut p = Parser::new(vec![Token {
             kind: TokenKind::Ident("t".to_string()),
             pos: Default::default(),
         }]);
-        assert_eq!(
-            p.r#type(),
-            Some(Type::path(Module::Ident(Ident::from("t"))))
-        );
+        assert_eq!(p.r#type(), Ok(Type::path(Module::Ident(Ident::from("t")))));
     }
 
     #[test]
@@ -983,7 +980,7 @@ mod tests {
         ]);
         assert_eq!(
             p.signature(),
-            Some(Sig::Seq(vec![Decl::ManType(
+            Ok(Sig::Seq(vec![Decl::ManType(
                 Ident::from("x"),
                 Type::path(Module::Ident(Ident::from("t")))
             )]))
@@ -1012,7 +1009,7 @@ mod tests {
         ]);
         assert_eq!(
             p.decl(),
-            Some(Decl::ManType(
+            Ok(Decl::ManType(
                 Ident::from("x"),
                 Type::path(Module::Ident(Ident::from("t")))
             ))
@@ -1039,10 +1036,7 @@ mod tests {
                 pos: Position { line: 0, column: 9 },
             },
         ]);
-        assert_eq!(
-            p.binding(),
-            Some(Binding::Type(Ident::from("t"), Type::Int))
-        );
+        assert_eq!(p.binding(), Ok(Binding::Type(Ident::from("t"), Type::Int)));
 
         let mut p = Parser::new(vec![
             Token {
@@ -1064,7 +1058,7 @@ mod tests {
         ]);
         assert_eq!(
             p.binding(),
-            Some(Binding::Val(Ident::from("x"), Expr::Int(3)))
+            Ok(Binding::Val(Ident::from("x"), Expr::Int(3)))
         );
 
         let mut p = Parser::new(vec![
@@ -1087,7 +1081,7 @@ mod tests {
         ]);
         assert_eq!(
             p.binding(),
-            Some(Binding::Type(
+            Ok(Binding::Type(
                 Ident::from("x"),
                 Type::path(Module::Ident(Ident::from("t")))
             ))
@@ -1097,7 +1091,7 @@ mod tests {
     #[test]
     fn parse_module() {
         let mut p = Parser::new(vec![]);
-        assert_eq!(p.module(), None);
+        assert_eq!(p.module(), Err(ParseError::UnexpectedEOF));
 
         let mut p = Parser::new(vec![
             Token {
@@ -1109,7 +1103,7 @@ mod tests {
                 pos: Position { line: 0, column: 7 },
             },
         ]);
-        assert_eq!(p.module(), Some(Module::Seq(vec![])));
+        assert_eq!(p.module(), Ok(Module::Seq(vec![])));
 
         let mut p = Parser::new(vec![
             Token {
@@ -1151,7 +1145,7 @@ mod tests {
         ]);
         assert_eq!(
             p.module(),
-            Some(Module::Seq(vec![Binding::Type(
+            Ok(Module::Seq(vec![Binding::Type(
                 Ident::from("t"),
                 Type::Int
             )]))
