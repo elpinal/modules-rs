@@ -49,6 +49,7 @@ pub enum Expr {
     Abs(Ident, Box<Expr>),
     App(Box<Expr>, Box<Expr>),
     Path(Path),
+    Pack(Box<Module>, Sig),
     Int(isize),
 }
 
@@ -63,6 +64,7 @@ pub enum Module {
     Fun(Ident, Sig, Box<Module>),
     App(Ident, Ident),
     Seal(Ident, Sig),
+    Unpack(Box<Expr>, Sig),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -909,6 +911,16 @@ impl Elaboration for Module {
                     Subst::default(),
                 ))
             }
+            Unpack(ref e, ref sig) => {
+                let (asig, s1) = sig.elaborate(env)?;
+                let asig = asig.normalize();
+                let ty1 = IType::from(asig.clone());
+                let (t, ty, s2) = e.elaborate(env)?;
+                if !ty.equal(&ty1) {
+                    Err(TypeError::TypeMismatch(ty, ty1))?;
+                }
+                Ok((t, asig, s1.compose(s2)))
+            }
         }
     }
 }
@@ -1202,6 +1214,10 @@ impl Expr {
         Expr::Path(Path::from(m))
     }
 
+    fn pack(m: Module, sig: Sig) -> Self {
+        Expr::Pack(Box::new(m), sig)
+    }
+
     fn infer(&self, env: &mut Env) -> Result<(ITerm, IType, Subst), TypeError> {
         use Expr::*;
         use IKind::*;
@@ -1241,6 +1257,13 @@ impl Expr {
                 let ty = ssig.get_atomic_term()?;
                 let (ty, tys) = ty.new_instance(env);
                 Ok((ITerm::inst(t, tys), ty, s))
+            }
+            Pack(ref m, ref sig) => {
+                let (t2, asig0, s1) = m.elaborate(env)?;
+                let (asig, s2) = sig.elaborate(env)?;
+                let asig = asig.normalize();
+                let t1 = asig0.subtype_of(env, &asig)?;
+                Ok((ITerm::app(t1, t2), asig.into(), s1.compose(s2)))
             }
         }
     }
@@ -1392,6 +1415,10 @@ impl Module {
 
     fn fun(id: Ident, sig: Sig, m: Module) -> Self {
         Module::Fun(id, sig, Box::new(m))
+    }
+
+    fn unpack(e: Expr, sig: Sig) -> Self {
+        Module::Unpack(Box::new(e), sig)
     }
 }
 
