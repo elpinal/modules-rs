@@ -23,6 +23,7 @@ pub struct TypeClosure {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     Int(isize),
+    Bool(bool),
     Closure(Closure),
     TypeClosure(TypeClosure),
     Record(Record<Value>),
@@ -116,6 +117,7 @@ impl DynEnv {
                 v => bail!("not package: {:?}", v),
             },
             Int(n) => Ok(Value::Int(n)),
+            Bool(b) => Ok(Value::Bool(b)),
             Let(t1, t2) => {
                 let v = self.reduce(*t1)?;
                 self.insert(v);

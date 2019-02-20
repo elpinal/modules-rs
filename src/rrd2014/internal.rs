@@ -52,6 +52,7 @@ pub enum Type {
     Abs(Kind, Box<Type>),
     App(Box<Type>, Box<Type>),
     Int,
+    Bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -78,6 +79,7 @@ pub enum Term {
     Unpack(Box<Term>, Box<Term>),
 
     Int(isize),
+    Bool(bool),
 
     /// Just a syntax sugar for `App(Abs(ty, t2), t1)`, but convenient for debugging and it reduces
     /// the size of terms.
@@ -222,7 +224,7 @@ impl Shift for Term {
     fn shift_above(&mut self, c: usize, d: isize) {
         use Term::*;
         match *self {
-            Var(_) | Int(_) => (),
+            Var(_) | Int(_) | Bool(_) => (),
             Abs(ref mut ty, ref mut t) => {
                 ty.shift_above(c, d);
                 t.shift_above(c, d);
@@ -356,7 +358,7 @@ impl Substitution for Type {
                 ty1.apply(s);
                 ty2.apply(s);
             }
-            Int => (),
+            Int | Bool => (),
         }
     }
 }
@@ -365,7 +367,7 @@ impl Substitution for Term {
     fn apply(&mut self, s: &Subst) {
         use Term::*;
         match *self {
-            Var(_) | Int(_) => (),
+            Var(_) | Int(_) | Bool(_) => (),
             Abs(ref mut ty, ref mut t) => {
                 ty.apply(s);
                 t.apply(s);
@@ -428,7 +430,7 @@ impl Fgtv for Type {
         use Type::*;
         match *self {
             Var(Variable::Generated(n)) => HashSet::from_iter(vec![n]),
-            Var(_) | Int => HashSet::new(),
+            Var(_) | Int | Bool => HashSet::new(),
             Fun(ref ty1, ref ty2) => {
                 let mut s = ty1.fgtv();
                 s.extend(ty2.fgtv());
@@ -847,7 +849,7 @@ impl Type {
                 ty1.map(f, c);
                 ty2.map(f, c);
             }
-            Int => (),
+            Int | Bool => (),
         }
     }
 
@@ -912,7 +914,7 @@ impl Type {
     fn reduce(self) -> Self {
         use Type::*;
         match self {
-            Var(_) | Int => self,
+            Var(_) | Int | Bool => self,
             Fun(ty1, ty2) => Type::fun(ty1.reduce(), ty2.reduce()),
             Record(r) => Type::record(r.0.into_iter().map(|(l, ty)| (l, ty.reduce()))),
             // TODO: Is there any case where kinds depends on types which are sensible about
@@ -953,7 +955,7 @@ impl Type {
             Some(ref k, ref ty) => k.eta_reducible(n + 1) && ty.eta_reducible(n + 1),
             Abs(ref k, ref ty) => k.eta_reducible(n + 1) && ty.eta_reducible(n + 1),
             App(ref ty1, ref ty2) => ty1.eta_reducible(n) && ty2.eta_reducible(n),
-            Int => true,
+            Int | Bool => true,
         }
     }
 
@@ -1009,7 +1011,7 @@ impl Type {
                     _ => Err(KindError::NotFunction(k1)),
                 }
             }
-            Int => Ok(Mono),
+            Int | Bool => Ok(Mono),
         }
     }
 
@@ -1491,6 +1493,7 @@ impl Term {
                 ty1 => Err(TypeError::NotSome(ty1)),
             },
             Int(_) => Ok(Type::Int),
+            Bool(_) => Ok(Type::Bool),
             Let(ref t1, ref t2) => {
                 let ty1 = t1.type_of(ctx)?;
                 ctx.insert_value(Cow::Owned(ty1));

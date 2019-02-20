@@ -42,6 +42,7 @@ pub enum Type {
     Pack(Box<Sig>),
 
     Int,
+    Bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -51,6 +52,7 @@ pub enum Expr {
     Path(Path),
     Pack(Box<Module>, Sig),
     Int(isize),
+    Bool(bool),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -521,6 +523,7 @@ impl Elaboration for Type {
         use Type::*;
         match *self {
             Int => Ok((IType::Int, IKind::Mono, Subst::default())),
+            Bool => Ok((IType::Bool, IKind::Mono, Subst::default())),
             Fun(ref ty1, ref ty2) => {
                 let (ty11, k1, s1) = ty1.elaborate(env)?;
                 k1.mono()
@@ -1251,7 +1254,6 @@ impl Expr {
                 let s = s1.compose(s2).compose(s3);
                 Ok((ITerm::app(t1, t2), v, s))
             }
-            Int(n) => Ok((ITerm::Int(n), IType::Int, Subst::default())),
             Path(ref p) => {
                 let (t, ssig, s) = p.elaborate(env)?;
                 let ty = ssig.get_atomic_term()?;
@@ -1265,6 +1267,8 @@ impl Expr {
                 let t1 = asig0.subtype_of(env, &asig)?;
                 Ok((ITerm::app(t1, t2), asig.into(), s1.compose(s2)))
             }
+            Int(n) => Ok((ITerm::Int(n), IType::Int, Subst::default())),
+            Bool(b) => Ok((ITerm::Bool(b), IType::Bool, Subst::default())),
         }
     }
 }

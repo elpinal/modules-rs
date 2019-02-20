@@ -51,6 +51,7 @@ use position::Position;
 enum TokenKind {
     Mono,
     Int,
+    Bool,
     Arrow,
     Lambda,
     Dot,
@@ -80,6 +81,8 @@ enum TokenKind {
 
     Ident(String),
     IntLit(isize),
+    True,
+    False,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -336,6 +339,9 @@ impl Lexer {
 fn keyword_or_ident(s: String) -> TokenKind {
     match s.as_str() {
         "int" => TokenKind::Int,
+        "bool" => TokenKind::Bool,
+        "true" => TokenKind::True,
+        "false" => TokenKind::False,
         "fun" => TokenKind::Fun,
         "val" => TokenKind::Val,
         "type" => TokenKind::Type,
@@ -423,6 +429,10 @@ impl Parser {
                 self.proceed();
                 Ok(Type::Int)
             }
+            TokenKind::Bool => {
+                self.proceed();
+                Ok(Type::Bool)
+            }
             TokenKind::Ident(_) => {
                 let m = self.module()?;
                 Ok(Type::path(m))
@@ -465,6 +475,14 @@ impl Parser {
             TokenKind::IntLit(n) => {
                 self.proceed();
                 Ok(Expr::Int(n))
+            }
+            TokenKind::False => {
+                self.proceed();
+                Ok(Expr::Bool(false))
+            }
+            TokenKind::True => {
+                self.proceed();
+                Ok(Expr::Bool(true))
             }
             TokenKind::Ident(s) => {
                 self.proceed();
