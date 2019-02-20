@@ -3,7 +3,6 @@ use std::iter::FromIterator;
 use std::iter::Peekable;
 use std::vec::IntoIter;
 
-use failure::err_msg;
 use failure::Fail;
 use failure::Fallible;
 
@@ -81,11 +80,25 @@ enum LexError {
     #[fail(display = "{}:{}: illegal character: {:?}", _0, _1, _2)]
     IllegalCharacter(usize, usize, char),
 
+    #[fail(display = "{}:{}: expected {}, but found {:?}", _0, _1, _2, _3)]
+    Expected(usize, usize, String, char),
+}
+
+#[derive(Debug, Fail, PartialEq)]
+enum ParseError {
+    #[fail(display = "unexpected end of file")]
+    UnexpectedEOF,
+
+    #[fail(display = "{}:{}: expected {}, but found {:?}", _0, _1, _2, _3)]
+    Expected(usize, usize, String, TokenKind),
+
     #[fail(display = "{}:{}: expected {:?}, but found {:?}", _0, _1, _2, _3)]
-    Expected(usize, usize, char, char),
+    ExpectedToken(usize, usize, TokenKind, TokenKind),
 }
 
 type Res<T> = Result<T, LexError>;
+
+type ParseRes<T> = Result<T, ParseError>;
 
 impl TokenKind {
     fn ident(s: &str) -> Self {
@@ -204,7 +217,12 @@ impl Lexer {
                 kind: TokenKind::Arrow,
                 pos,
             }),
-            Some(ch) => Err(LexError::Expected(self.line, self.column, '>', ch)),
+            Some(ch) => Err(LexError::Expected(
+                self.line,
+                self.column,
+                '>'.to_string(),
+                ch,
+            )),
             None => Err(LexError::UnexpectedEOF(self.line, self.column)),
         }
     }
@@ -314,6 +332,16 @@ fn keyword_or_ident(s: String) -> TokenKind {
     }
 }
 
+impl ParseError {
+    fn expected(s: &str, token: Token) -> Self {
+        ParseError::Expected(token.pos.line, token.pos.column, s.to_string(), token.kind)
+    }
+
+    fn expected_token(kind: TokenKind, token: Token) -> Self {
+        ParseError::ExpectedToken(token.pos.line, token.pos.column, kind, token.kind)
+    }
+}
+
 impl Parser {
     fn new(src: Vec<Token>) -> Self {
         Parser {
@@ -337,6 +365,10 @@ impl Parser {
         self.src = s.0
     }
 
+    fn next(&mut self) -> ParseRes<Token> {
+        self.next_opt().ok_or(ParseError::UnexpectedEOF)
+    }
+
     fn next_opt(&mut self) -> Option<Token> {
         self.src.next()
     }
@@ -345,64 +377,72 @@ impl Parser {
         self.src.next();
     }
 
-    fn peek(&mut self) -> Option<Token> {
-        self.src.peek().cloned()
+    fn peek(&mut self) -> ParseRes<Token> {
+        self.src.peek().cloned().ok_or(ParseError::UnexpectedEOF)
     }
 
-    fn kind(&mut self) -> Option<Kind> {
-        match self.next_opt()?.kind {
-            TokenKind::Mono => Some(Kind::Mono),
-            _ => None,
+    fn kind(&mut self) -> ParseRes<Kind> {
+        let token = self.next()?;
+        match token.kind {
+            TokenKind::Mono => Ok(Kind::Mono),
+            k => Err(ParseError::Expected(
+                token.pos.line,
+                token.pos.column,
+                "kind".to_string(),
+                k,
+            )),
         }
     }
 
-    fn type_atom(&mut self) -> Option<Type> {
-        match self.peek()?.kind {
+    fn type_atom(&mut self) -> ParseRes<Type> {
+        let token = self.peek()?;
+        match token.kind {
             TokenKind::Int => {
                 self.proceed();
-                Some(Type::Int)
+                Ok(Type::Int)
             }
             TokenKind::Ident(_) => {
                 let m = self.module()?;
-                Some(Type::path(m))
+                Ok(Type::path(m))
             }
             TokenKind::LParen => {
                 let state = self.save();
-                if let Some(m) = self.module() {
-                    return Some(Type::path(m));
+                if let Ok(m) = self.module() {
+                    return Ok(Type::path(m));
                 } else {
                     self.restore(state);
                 }
                 self.proceed();
                 let ty = self.r#type()?;
                 self.expect(TokenKind::RParen)?;
-                Some(ty)
+                Ok(ty)
             }
             TokenKind::Pack => {
                 self.proceed();
                 let sig = self.signature_atom()?;
-                Some(Type::pack(sig))
+                Ok(Type::pack(sig))
             }
-            _ => None,
+            _ => Err(ParseError::expected("type", token)),
         }
     }
 
-    fn r#type(&mut self) -> Option<Type> {
+    fn r#type(&mut self) -> ParseRes<Type> {
         let ty = self.type_atom()?;
         match self.peek().map(|t| t.kind) {
-            Some(TokenKind::Arrow) => {
+            Ok(TokenKind::Arrow) => {
                 self.proceed();
-                Some(Type::fun(ty, self.r#type()?))
+                Ok(Type::fun(ty, self.r#type()?))
             }
-            _ => Some(ty),
+            _ => Ok(ty),
         }
     }
 
-    fn expr_atom(&mut self) -> Option<Expr> {
-        match self.peek()?.kind {
+    fn expr_atom(&mut self) -> ParseRes<Expr> {
+        let token = self.peek()?;
+        match token.kind {
             TokenKind::IntLit(n) => {
                 self.proceed();
-                Some(Expr::Int(n))
+                Ok(Expr::Int(n))
             }
             TokenKind::Ident(s) => {
                 self.proceed();
@@ -412,56 +452,57 @@ impl Parser {
                     let id = self.ident()?;
                     m0 = Module::proj(m0, id);
                 }
-                Some(Expr::path(m0))
+                Ok(Expr::path(m0))
             }
             TokenKind::LParen => {
                 let state = self.save();
-                if let Some(e) = self.expr_atom_aux() {
-                    return Some(e);
+                if let Ok(e) = self.expr_atom_aux() {
+                    return Ok(e);
                 } else {
                     self.restore(state);
                 }
-                Some(Expr::path(self.module()?))
+                Ok(Expr::path(self.module()?))
             }
-            _ => None,
+            _ => Err(ParseError::expected("expression", token)),
         }
     }
 
-    fn expr_atom_aux(&mut self) -> Option<Expr> {
+    fn expr_atom_aux(&mut self) -> ParseRes<Expr> {
         self.proceed();
         let e = self.expr()?;
         self.expect(TokenKind::RParen)?;
-        Some(e)
+        Ok(e)
     }
 
-    fn expect(&mut self, kind: TokenKind) -> Option<Token> {
-        match self.next_opt()? {
-            token if token.kind == kind => Some(token),
-            _ => None,
+    fn expect(&mut self, kind: TokenKind) -> ParseRes<Token> {
+        match self.next()? {
+            token if token.kind == kind => Ok(token),
+            token => Err(ParseError::expected_token(kind, token)),
         }
     }
 
     fn peek_expect(&mut self, kind: TokenKind) -> bool {
-        if let Some(token) = self.peek() {
+        if let Ok(token) = self.peek() {
             token.kind == kind
         } else {
             false
         }
     }
 
-    fn abs(&mut self) -> Option<Expr> {
-        match self.next_opt()?.kind {
+    fn abs(&mut self) -> ParseRes<Expr> {
+        let token = self.next()?;
+        match token.kind {
             TokenKind::Ident(s) => {
                 let id = Ident::from(s);
                 self.expect(TokenKind::Dot)?;
                 let e = self.expr()?;
-                Some(Expr::abs(id, e))
+                Ok(Expr::abs(id, e))
             }
-            _ => None,
+            _ => Err(ParseError::expected("identifier", token)),
         }
     }
 
-    fn expr(&mut self) -> Option<Expr> {
+    fn expr(&mut self) -> ParseRes<Expr> {
         match self.peek()?.kind {
             TokenKind::Lambda => {
                 self.proceed();
@@ -472,21 +513,21 @@ impl Parser {
                 let m = self.module()?;
                 self.expect(TokenKind::Colon)?;
                 let sig = self.signature()?;
-                Some(Expr::pack(m, sig))
+                Ok(Expr::pack(m, sig))
             }
             _ => {
                 let mut e0 = self.expr_atom()?;
-                while let Some(e) = self.expr_atom() {
+                while let Ok(e) = self.expr_atom() {
                     e0 = Expr::app(e0, e);
                 }
-                Some(e0)
+                Ok(e0)
             }
         }
     }
 
-    fn decl(&mut self) -> Option<Decl> {
-        let token_opt = self.peek();
-        match token_opt?.kind {
+    fn decl(&mut self) -> ParseRes<Decl> {
+        let token = self.peek()?;
+        match token.kind {
             TokenKind::Val => {
                 self.proceed();
                 self.val_decl()
@@ -507,84 +548,88 @@ impl Parser {
                 self.proceed();
                 self.include_decl()
             }
-            _ => None,
+            _ => Err(ParseError::expected("declaration", token)),
         }
     }
 
-    fn ident(&mut self) -> Option<Ident> {
-        match self.next_opt()?.kind {
-            TokenKind::Ident(s) => Some(Ident::from(s)),
-            _ => None,
+    fn ident(&mut self) -> ParseRes<Ident> {
+        let token = self.next()?;
+        match token.kind {
+            TokenKind::Ident(s) => Ok(Ident::from(s)),
+            _ => Err(ParseError::expected("identifier", token)),
         }
     }
 
-    fn peek_ident(&mut self) -> Option<Ident> {
-        match self.peek()?.kind {
-            TokenKind::Ident(s) => Some(Ident::from(s)),
-            _ => None,
+    fn peek_ident(&mut self) -> ParseRes<Ident> {
+        let token = self.peek()?;
+        match token.kind {
+            TokenKind::Ident(s) => Ok(Ident::from(s)),
+            _ => Err(ParseError::expected("identifier", token)),
         }
     }
 
-    fn val_decl(&mut self) -> Option<Decl> {
+    fn val_decl(&mut self) -> ParseRes<Decl> {
         let id = self.ident()?;
         self.expect(TokenKind::Colon)?;
         let ty = self.r#type()?;
-        Some(Decl::Val(id, ty))
+        Ok(Decl::Val(id, ty))
     }
 
-    fn type_decl(&mut self) -> Option<Decl> {
+    fn type_decl(&mut self) -> ParseRes<Decl> {
         let id = self.ident()?;
-        match self.next_opt()?.kind {
+        let token = self.next()?;
+        match token.kind {
             TokenKind::Colon => {
                 let k = self.kind()?;
-                Some(Decl::AbsType(id, k))
+                Ok(Decl::AbsType(id, k))
             }
             TokenKind::Equal => {
                 let ty = self.r#type()?;
-                Some(Decl::ManType(id, ty))
+                Ok(Decl::ManType(id, ty))
             }
-            _ => None,
+            _ => Err(ParseError::expected("':' or '='", token)),
         }
     }
 
-    fn module_decl(&mut self) -> Option<Decl> {
+    fn module_decl(&mut self) -> ParseRes<Decl> {
         let id = self.ident()?;
         self.expect(TokenKind::Colon)?;
         let sig = self.signature()?;
-        Some(Decl::Module(id, sig))
+        Ok(Decl::Module(id, sig))
     }
 
-    fn signature_decl(&mut self) -> Option<Decl> {
+    fn signature_decl(&mut self) -> ParseRes<Decl> {
         let id = self.ident()?;
         self.expect(TokenKind::Equal)?;
         let sig = self.signature()?;
-        Some(Decl::Signature(id, sig))
+        Ok(Decl::Signature(id, sig))
     }
 
-    fn include_decl(&mut self) -> Option<Decl> {
+    fn include_decl(&mut self) -> ParseRes<Decl> {
         let sig = self.signature()?;
-        Some(Decl::Include(sig))
+        Ok(Decl::Include(sig))
     }
 
-    fn signature_atom(&mut self) -> Option<Sig> {
-        match self.peek()?.kind {
+    fn signature_atom(&mut self) -> ParseRes<Sig> {
+        let token = self.peek()?;
+        match token.kind {
             TokenKind::Sig => {
                 self.proceed();
                 let mut v = Vec::new();
-                while let Some(decl) = self.decl() {
+                while let Ok(decl) = self.decl() {
                     v.push(decl);
                 }
                 self.expect(TokenKind::End)?;
-                Some(Sig::Seq(v))
+                Ok(Sig::Seq(v))
             }
             TokenKind::Ident(_) => {
                 let m = self.module()?;
-                Some(Sig::path(m))
+                Ok(Sig::path(m))
             }
             TokenKind::LParen => {
                 let state = self.save();
-                if let Some(m) = self.module() {
-                    return Some(Sig::path(m));
+                if let Ok(m) = self.module() {
+                    return Ok(Sig::path(m));
                 } else {
                     self.restore(state);
                 }
@@ -595,13 +640,16 @@ impl Parser {
                 self.expect(TokenKind::RParen)?;
                 self.expect(TokenKind::Arrow)?;
                 let sig2 = self.signature()?;
-                Some(Sig::fun(id, sig1, sig2))
+                Ok(Sig::fun(id, sig1, sig2))
             }
-            _ => None,
+            _ => Err(ParseError::expected(
+                "signature ('sig', identifier, etc.)",
+                token,
+            )),
         }
     }
 
-    fn signature(&mut self) -> Option<Sig> {
+    fn signature(&mut self) -> ParseRes<Sig> {
         let sig = self.signature_atom()?;
         if self.peek_expect(TokenKind::Where) {
             self.proceed();
@@ -614,15 +662,15 @@ impl Parser {
             }
             self.expect(TokenKind::Equal)?;
             let ty = self.r#type()?;
-            Some(Sig::r#where(sig, Proj(root, v), ty))
+            Ok(Sig::r#where(sig, Proj(root, v), ty))
         } else {
-            Some(sig)
+            Ok(sig)
         }
     }
 
-    fn binding(&mut self) -> Option<Binding> {
-        let token_opt = self.peek();
-        match token_opt?.kind {
+    fn binding(&mut self) -> ParseRes<Binding> {
+        let token = self.peek()?;
+        match token.kind {
             TokenKind::Val => {
                 self.proceed();
                 self.val_binding()
@@ -643,60 +691,61 @@ impl Parser {
                 self.proceed();
                 self.include_binding()
             }
-            _ => None,
+            _ => Err(ParseError::expected("binding", token)),
         }
     }
 
-    fn val_binding(&mut self) -> Option<Binding> {
+    fn val_binding(&mut self) -> ParseRes<Binding> {
         let id = self.ident()?;
         self.expect(TokenKind::Equal)?;
         let e = self.expr()?;
-        Some(Binding::Val(id, e))
+        Ok(Binding::Val(id, e))
     }
 
-    fn type_binding(&mut self) -> Option<Binding> {
+    fn type_binding(&mut self) -> ParseRes<Binding> {
         let id = self.ident()?;
         self.expect(TokenKind::Equal)?;
         let ty = self.r#type()?;
-        Some(Binding::Type(id, ty))
+        Ok(Binding::Type(id, ty))
     }
 
-    fn module_binding(&mut self) -> Option<Binding> {
+    fn module_binding(&mut self) -> ParseRes<Binding> {
         let id = self.ident()?;
         self.expect(TokenKind::Equal)?;
         let m = self.module()?;
-        Some(Binding::Module(id, m))
+        Ok(Binding::Module(id, m))
     }
 
-    fn signature_binding(&mut self) -> Option<Binding> {
+    fn signature_binding(&mut self) -> ParseRes<Binding> {
         let id = self.ident()?;
         self.expect(TokenKind::Equal)?;
         let sig = self.signature()?;
-        Some(Binding::Signature(id, sig))
+        Ok(Binding::Signature(id, sig))
     }
 
-    fn include_binding(&mut self) -> Option<Binding> {
+    fn include_binding(&mut self) -> ParseRes<Binding> {
         let m = self.module()?;
-        Some(Binding::Include(m))
+        Ok(Binding::Include(m))
     }
 
-    fn module_ident(&mut self, id: Ident) -> Option<Module> {
+    fn module_ident(&mut self, id: Ident) -> ParseRes<Module> {
         match self.peek().map(|t| t.kind) {
-            Some(TokenKind::OpaqueSealing) => {
+            Ok(TokenKind::OpaqueSealing) => {
                 self.proceed();
                 let sig = self.signature()?;
-                Some(Module::Seal(id, sig))
+                Ok(Module::Seal(id, sig))
             }
-            Some(TokenKind::Ident(s)) => {
+            Ok(TokenKind::Ident(s)) => {
                 self.proceed();
-                Some(Module::App(id, Ident::from(s)))
+                Ok(Module::App(id, Ident::from(s)))
             }
-            _ => Some(Module::Ident(id)),
+            _ => Ok(Module::Ident(id)),
         }
     }
 
-    fn module_atom(&mut self) -> Option<Module> {
-        match self.peek()?.kind {
+    fn module_atom(&mut self) -> ParseRes<Module> {
+        let token = self.peek()?;
+        match token.kind {
             TokenKind::Ident(s) => {
                 self.proceed();
                 self.module_ident(Ident::from(s))
@@ -705,22 +754,22 @@ impl Parser {
                 self.proceed();
                 let m = self.module()?;
                 self.expect(TokenKind::RParen)?;
-                Some(m)
+                Ok(m)
             }
-            _ => None,
+            _ => Err(ParseError::expected("module", token)),
         }
     }
 
-    fn module(&mut self) -> Option<Module> {
+    fn module(&mut self) -> ParseRes<Module> {
         match self.peek()?.kind {
             TokenKind::Struct => {
                 self.proceed();
                 let mut v = Vec::new();
-                while let Some(binding) = self.binding() {
+                while let Ok(binding) = self.binding() {
                     v.push(binding);
                 }
                 self.expect(TokenKind::End)?;
-                Some(Module::Seq(v))
+                Ok(Module::Seq(v))
             }
             TokenKind::Fun => {
                 self.proceed();
@@ -729,14 +778,14 @@ impl Parser {
                 let sig = self.signature()?;
                 self.expect(TokenKind::DoubleArrow)?;
                 let m = self.module()?;
-                Some(Module::fun(id, sig, m))
+                Ok(Module::fun(id, sig, m))
             }
             TokenKind::Unpack => {
                 self.proceed();
                 let e = self.expr()?;
                 self.expect(TokenKind::Colon)?;
                 let sig = self.signature()?;
-                Some(Module::unpack(e, sig))
+                Ok(Module::unpack(e, sig))
             }
             _ => {
                 let mut m0 = self.module_atom()?;
@@ -745,7 +794,7 @@ impl Parser {
                     let id = self.ident()?;
                     m0 = Module::proj(m0, id);
                 }
-                Some(m0)
+                Ok(m0)
             }
         }
     }
@@ -758,7 +807,7 @@ where
     let mut l = Lexer::new(src.into_iter().collect());
     let tokens = l.lex_all()?;
     let mut p = Parser::new(tokens);
-    p.module().ok_or_else(|| err_msg("parse error"))
+    Ok(p.module()?)
 }
 
 pub fn parse_file<P>(filename: P) -> Fallible<Module>
