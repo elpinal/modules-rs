@@ -7,8 +7,10 @@
 pub mod internal;
 pub mod parser;
 
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::collections::VecDeque;
 use std::convert::TryFrom;
 use std::iter::FromIterator;
 
@@ -1276,6 +1278,21 @@ impl SemanticSig {
         }
         Ok(ssig)
     }
+
+    fn first_apper(&self, v: internal::Variable) -> Option<VecDeque<Label>> {
+        use SemanticSig::*;
+        match *self {
+            AtomicType(IType::Var(v0), _) if v0 == v => Some(VecDeque::new()),
+            StructureSig(ref m) => {
+                let (l, mut v) = BTreeMap::from_iter(m)
+                    .into_iter()
+                    .find_map(|(l, ssig)| ssig.first_apper(v).map(|v| (l, v)))?;
+                v.push_front(l.clone());
+                Some(v)
+            }
+            _ => None,
+        }
+    }
 }
 
 impl Sig {
@@ -1969,6 +1986,89 @@ mod tests {
                     )
                 ])
             )
+        );
+    }
+
+    #[test]
+    fn variable_apper_first() {
+        use internal::Variable::*;
+        use IKind::Mono;
+        use IType as Type;
+        use IType::Int;
+        use SemanticSig::*;
+
+        let l = Label::from;
+
+        assert_eq!(AtomicTerm(Int).first_apper(Variable(0)), None);
+        assert_eq!(AtomicTerm(Type::var(0)).first_apper(Variable(0)), None);
+
+        assert_eq!(AtomicType(Int, Mono).first_apper(Variable(0)), None);
+        assert_eq!(
+            AtomicType(Type::var(0), Mono).first_apper(Variable(0)),
+            Some(VecDeque::new())
+        );
+        assert_eq!(
+            AtomicType(Type::var(0), Mono).first_apper(Variable(1)),
+            None
+        );
+
+        assert_eq!(
+            SemanticSig::structure_sig(vec![(l("a"), AtomicType(Type::var(0), Mono))])
+                .first_apper(Variable(0)),
+            Some(VecDeque::from(vec![l("a")]))
+        );
+        assert_eq!(
+            SemanticSig::structure_sig(vec![(l("b"), AtomicType(Type::var(0), Mono))])
+                .first_apper(Variable(0)),
+            Some(VecDeque::from(vec![l("b")]))
+        );
+        assert_eq!(
+            SemanticSig::structure_sig(vec![
+                (l("abc"), AtomicType(Type::var(0), Mono)),
+                (l("ab"), AtomicType(Type::var(0), Mono))
+            ])
+            .first_apper(Variable(0)),
+            Some(VecDeque::from(vec![l("ab")]))
+        );
+        assert_eq!(
+            SemanticSig::structure_sig(vec![
+                (l("abc"), AtomicType(Type::var(0), Mono)),
+                (l("ab"), AtomicType(Type::var(1), Mono))
+            ])
+            .first_apper(Variable(0)),
+            Some(VecDeque::from(vec![l("abc")]))
+        );
+        assert_eq!(
+            SemanticSig::structure_sig(vec![
+                (l("abc"), AtomicType(Type::var(0), Mono)),
+                (l("ab"), AtomicType(Type::var(1), Mono))
+            ])
+            .first_apper(Variable(1)),
+            Some(VecDeque::from(vec![l("ab")]))
+        );
+
+        assert_eq!(
+            SemanticSig::structure_sig(vec![
+                (l("abc"), AtomicType(Type::var(0), Mono)),
+                (
+                    l("ab"),
+                    SemanticSig::structure_sig(vec![(l("def"), AtomicType(Type::var(0), Mono))])
+                )
+            ])
+            .first_apper(Variable(0)),
+            Some(VecDeque::from(vec![l("ab"), l("def")]))
+        );
+
+        assert_eq!(
+            SemanticSig::structure_sig(vec![
+                (l("a"), AtomicType(Type::var(0), Mono)),
+                (
+                    l("ab"),
+                    SemanticSig::structure_sig(vec![(l("def"), AtomicType(Type::var(0), Mono))])
+                )
+            ])
+            .first_apper(Variable(0)),
+            Some(VecDeque::from(vec![l("a")]))
         );
     }
 }
