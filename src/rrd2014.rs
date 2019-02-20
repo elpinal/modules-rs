@@ -806,6 +806,7 @@ impl Elaboration for Module {
                     env.insert_types(ex.0.qs.clone().into_iter().map(|(k, s)| (k, Some(s))));
                     env.insert_dummy_values(if len == 0 { 1 } else { len });
                     qs.extend(ex.0.qs.clone());
+                    body.shift(isize::try_from(len).unwrap());
                     body.extend(ex.0.body.clone());
                     let mut w = Vec::new();
                     for (i, (l, ssig)) in ex.0.body.into_iter().enumerate() {
