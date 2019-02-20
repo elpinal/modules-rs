@@ -417,6 +417,10 @@ trait Subtype {
     fn subtype_of(&self, env: &mut Env, another: &Self) -> Result<ITerm, Self::Error>;
 }
 
+trait Normalize {
+    fn normalize(self) -> Self;
+}
+
 #[derive(Debug, Fail, PartialEq)]
 pub enum SemanticSigError {
     #[fail(display = "unexpected atomic semantic signature: {:?}", _0)]
@@ -1052,6 +1056,49 @@ impl Subtype for AbstractSig {
     }
 }
 
+impl Normalize for IType {
+    fn normalize(self) -> Self {
+        // TODO: Canonicalize the order of quantified type variables in polymorphic types.
+        self
+    }
+}
+
+impl Normalize for SemanticSig {
+    fn normalize(self) -> Self {
+        use SemanticSig::*;
+        match self {
+            AtomicTerm(ty) => AtomicTerm(ty.normalize()),
+            AtomicType(..) => self,
+            AtomicSig(asig) => AtomicSig(Box::new(asig.normalize())),
+            StructureSig(m) => StructureSig(
+                m.into_iter()
+                    .map(|(l, ssig)| (l, ssig.normalize()))
+                    .collect(),
+            ),
+            FunctorSig(u) => {
+                let Fun(ssig, asig) = *u.0.body;
+                let ssig = ssig.normalize();
+                let (ks, s) = ssig.sort_quantifiers(u.0.qs);
+                let mut f = Fun(ssig, asig.normalize());
+                f.apply(&s);
+                FunctorSig(Universal(Quantified {
+                    qs: ks,
+                    body: Box::new(f),
+                }))
+            }
+        }
+    }
+}
+
+impl Normalize for AbstractSig {
+    fn normalize(self) -> Self {
+        let mut ssig = self.0.body.normalize();
+        let (ks, s) = ssig.sort_quantifiers(self.0.qs);
+        ssig.apply(&s);
+        Existential(Quantified { qs: ks, body: ssig })
+    }
+}
+
 impl<T> From<T> for Existential<T> {
     fn from(x: T) -> Self {
         Existential(Quantified {
@@ -1294,10 +1341,10 @@ impl SemanticSig {
         }
     }
 
-    fn sort_quantifiers(&self, ks: Vec<IKind>) -> (Vec<IKind>, Subst) {
+    fn sort_quantifiers<K>(&self, ks: Vec<K>) -> (Vec<K>, Subst) {
         use internal::Variable::Variable;
         let len = ks.len();
-        let mut xs: Vec<(IKind, usize)> = ks.into_iter().zip((0..len).rev()).collect();
+        let mut xs: Vec<(K, usize)> = ks.into_iter().zip((0..len).rev()).collect();
         xs.sort_unstable_by_key(|&(_, i)| self.first_apper(Variable(i)));
         let ys = (0..)
             .zip(xs)
@@ -2101,17 +2148,17 @@ mod tests {
         let l = Label::from;
 
         assert_eq!(
-            AtomicTerm(Int).sort_quantifiers(vec![]),
+            AtomicTerm(Int).sort_quantifiers::<()>(vec![]),
             (vec![], Subst::from_iter(vec![]))
         );
 
         assert_eq!(
-            AtomicType(Int, Mono).sort_quantifiers(vec![]),
+            AtomicType(Int, Mono).sort_quantifiers::<()>(vec![]),
             (vec![], Subst::from_iter(vec![]))
         );
 
         assert_eq!(
-            AtomicType(Type::var(0), Mono).sort_quantifiers(vec![]),
+            AtomicType(Type::var(0), Mono).sort_quantifiers::<()>(vec![]),
             (vec![], Subst::from_iter(vec![]))
         );
 
