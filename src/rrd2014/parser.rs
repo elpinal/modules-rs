@@ -83,6 +83,9 @@ enum TokenKind {
     IntLit(isize),
     True,
     False,
+    If,
+    Then,
+    Else,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -342,6 +345,9 @@ fn keyword_or_ident(s: String) -> TokenKind {
         "bool" => TokenKind::Bool,
         "true" => TokenKind::True,
         "false" => TokenKind::False,
+        "if" => TokenKind::If,
+        "then" => TokenKind::Then,
+        "else" => TokenKind::Else,
         "fun" => TokenKind::Fun,
         "val" => TokenKind::Val,
         "type" => TokenKind::Type,
@@ -554,6 +560,15 @@ impl Parser {
                 self.expect(TokenKind::Colon)?;
                 let sig = self.signature()?;
                 Ok(Expr::pack(m, sig))
+            }
+            TokenKind::If => {
+                self.proceed();
+                let e1 = self.expr()?;
+                self.expect(TokenKind::Then)?;
+                let e2 = self.expr()?;
+                self.expect(TokenKind::Else)?;
+                let e3 = self.expr()?;
+                Ok(Expr::r#if(e1, e2, e3))
             }
             _ => {
                 let mut e0 = self.expr_atom()?;

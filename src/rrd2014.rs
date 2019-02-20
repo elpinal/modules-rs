@@ -53,6 +53,7 @@ pub enum Expr {
     Pack(Box<Module>, Sig),
     Int(isize),
     Bool(bool),
+    If(Box<Expr>, Box<Expr>, Box<Expr>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1221,6 +1222,10 @@ impl Expr {
         Expr::Pack(Box::new(m), sig)
     }
 
+    fn r#if(e1: Expr, e2: Expr, e3: Expr) -> Self {
+        Expr::If(Box::new(e1), Box::new(e2), Box::new(e3))
+    }
+
     fn infer(&self, env: &mut Env) -> Result<(ITerm, IType, Subst), TypeError> {
         use Expr::*;
         use IKind::*;
@@ -1269,6 +1274,36 @@ impl Expr {
             }
             Int(n) => Ok((ITerm::Int(n), IType::Int, Subst::default())),
             Bool(b) => Ok((ITerm::Bool(b), IType::Bool, Subst::default())),
+            If(ref e1, ref e2, ref e3) => {
+                let (mut t1, ty1, s1) = e1.infer(env)?;
+                let u1 = env
+                    .unify(vec![(ty1, IType::Bool)])
+                    .map_err(|e| TypeError::Unification(self.clone(), e))?;
+                let (mut t2, mut ty2, s2) = e2.infer(env)?;
+                let (mut t3, ty3, s3) = e3.infer(env)?;
+                let u2 = env
+                    .unify(vec![(ty2.clone(), ty3)])
+                    .map_err(|e| TypeError::Unification(self.clone(), e))?;
+
+                t1.apply(&u1);
+                t1.apply(&s2);
+                t1.apply(&s3);
+                t1.apply(&u2);
+
+                t2.apply(&s3);
+                t2.apply(&u2);
+
+                ty2.apply(&s3);
+                ty2.apply(&u2);
+
+                t3.apply(&u2);
+
+                Ok((
+                    ITerm::r#if(t1, t2, t3),
+                    ty2,
+                    s1.compose(u1).compose(s2).compose(s3).compose(u2),
+                ))
+            }
         }
     }
 }

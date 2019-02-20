@@ -80,6 +80,7 @@ pub enum Term {
 
     Int(isize),
     Bool(bool),
+    If(Box<Term>, Box<Term>, Box<Term>),
 
     /// Just a syntax sugar for `App(Abs(ty, t2), t1)`, but convenient for debugging and it reduces
     /// the size of terms.
@@ -154,6 +155,9 @@ pub enum TypeError {
 
     #[fail(display = "not existential type: {:?}", _0)]
     NotSome(Type),
+
+    #[fail(display = "not boolean type: {:?}", _0)]
+    NotBool(Type),
 
     #[fail(display = "environment error: {}", _0)]
     Env(EnvError),
@@ -251,6 +255,11 @@ impl Shift for Term {
             Unpack(ref mut t1, ref mut t2) => {
                 t1.shift_above(c, d);
                 t2.shift_above(c + 1, d);
+            }
+            If(ref mut t1, ref mut t2, ref mut t3) => {
+                t1.shift_above(c, d);
+                t2.shift_above(c, d);
+                t3.shift_above(c, d);
             }
             Let(ref mut t1, ref mut t2) => {
                 t1.shift_above(c, d);
@@ -397,6 +406,11 @@ impl Substitution for Term {
                 t1.apply(s);
                 let s = &s.clone().shift(1);
                 t2.apply(s);
+            }
+            If(ref mut t1, ref mut t2, ref mut t3) => {
+                t1.apply(s);
+                t2.apply(s);
+                t3.apply(s);
             }
             Let(ref mut t1, ref mut t2) => {
                 t1.apply(s);
@@ -1078,6 +1092,10 @@ impl Term {
         Term::Record(Record::from_iter(iter))
     }
 
+    pub fn r#if(t1: Term, t2: Term, t3: Term) -> Self {
+        Term::If(Box::new(t1), Box::new(t2), Box::new(t3))
+    }
+
     /// Creates a successive projection.
     ///
     /// # Examples
@@ -1494,6 +1512,17 @@ impl Term {
             },
             Int(_) => Ok(Type::Int),
             Bool(_) => Ok(Type::Bool),
+            If(ref t1, ref t2, ref t3) => match t1.type_of(ctx)? {
+                Type::Bool => {
+                    let ty2 = t2.type_of(ctx)?;
+                    let ty3 = t3.type_of(ctx)?;
+                    if !ty2.equal(&ty3) {
+                        return Err(TypeError::TypeMismatch(ty2, ty3));
+                    }
+                    Ok(ty2)
+                }
+                ty => Err(TypeError::NotBool(ty)),
+            },
             Let(ref t1, ref t2) => {
                 let ty1 = t1.type_of(ctx)?;
                 ctx.insert_value(Cow::Owned(ty1));

@@ -118,6 +118,11 @@ impl DynEnv {
             },
             Int(n) => Ok(Value::Int(n)),
             Bool(b) => Ok(Value::Bool(b)),
+            If(t1, t2, t3) => match self.reduce(*t1)? {
+                Value::Bool(true) => self.reduce(*t2),
+                Value::Bool(false) => self.reduce(*t3),
+                v => bail!("not boolean: {:?}", v),
+            },
             Let(t1, t2) => {
                 let v = self.reduce(*t1)?;
                 self.insert(v);
