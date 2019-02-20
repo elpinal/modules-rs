@@ -732,7 +732,7 @@ impl Parser {
                 self.expect(TokenKind::RParen)?;
                 self.expect(TokenKind::Arrow)?;
                 let sig2 = self.signature()?;
-                Ok(Sig::fun(id, sig1, sig2))
+                Ok(Sig::generative(id, sig1, sig2))
             }
             _ => Err(ParseError::expected(
                 "signature ('sig', identifier, etc.)",

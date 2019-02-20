@@ -90,7 +90,7 @@ pub enum Binding {
 pub enum Sig {
     Path(Path),
     Seq(Vec<Decl>),
-    Fun(Ident, Box<Sig>, Box<Sig>),
+    Generative(Ident, Box<Sig>, Box<Sig>),
     Where(Box<Sig>, Proj<Ident>, Type),
 }
 
@@ -647,7 +647,7 @@ impl Elaboration for Sig {
                 env.drop_types(ex.0.qs.len());
                 Ok((ex.map(SemanticSig::StructureSig), s))
             }
-            Fun(ref id, ref domain, ref range) => {
+            Generative(ref id, ref domain, ref range) => {
                 let enter_state = env.get_state();
                 let (asig1, s1) = domain.elaborate(env)?;
                 env.insert_types(asig1.0.qs.clone().into_iter().map(|(k, s)| (k, Some(s))));
@@ -657,7 +657,7 @@ impl Elaboration for Sig {
                 env.drop_types(asig1.0.qs.len());
                 Ok((
                     Existential::from(SemanticSig::FunctorSig(
-                        Universal::from(asig1).map(|ssig| Box::new(self::Fun(ssig, asig2))),
+                        Universal::from(asig1).map(|ssig| Box::new(Fun(ssig, asig2))),
                     )),
                     s1.compose(s2),
                 ))
@@ -1477,8 +1477,8 @@ impl Sig {
         Sig::Path(Path::from(m))
     }
 
-    fn fun(id: Ident, sig1: Sig, sig2: Sig) -> Self {
-        Sig::Fun(id, Box::new(sig1), Box::new(sig2))
+    fn generative(id: Ident, sig1: Sig, sig2: Sig) -> Self {
+        Sig::Generative(id, Box::new(sig1), Box::new(sig2))
     }
 
     fn r#where(sig: Sig, p: Proj<Ident>, ty: Type) -> Self {
