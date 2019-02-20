@@ -86,6 +86,8 @@ enum TokenKind {
     If,
     Then,
     Else,
+    LessThan,
+    GreaterThan,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -223,6 +225,8 @@ impl Lexer {
             '.' => proceeding!(self.token(TokenKind::Dot)),
             '(' => proceeding!(self.token(TokenKind::LParen)),
             ')' => proceeding!(self.token(TokenKind::RParen)),
+            '<' => proceeding!(self.token(TokenKind::LessThan)),
+            '>' => proceeding!(self.token(TokenKind::GreaterThan)),
             ':' => {
                 self.proceed();
                 self.colon(pos)
@@ -548,6 +552,27 @@ impl Parser {
         }
     }
 
+    fn expr_term(&mut self) -> ParseRes<Expr> {
+        let mut e0 = self.expr_atom()?;
+        let mut state = self.save();
+        while let Ok(e) = self.expr_atom() {
+            e0 = Expr::app(e0, e);
+            state = self.save();
+        }
+        self.restore(state);
+        Ok(e0)
+    }
+
+    fn peek_operator(&mut self) -> ParseRes<BinOp> {
+        use super::BinOp::*;
+        let token = self.peek()?;
+        match token.kind {
+            TokenKind::LessThan => Ok(LessThan),
+            TokenKind::GreaterThan => Ok(GreaterThan),
+            _ => Err(ParseError::expected("binary operator", token)),
+        }
+    }
+
     fn expr(&mut self) -> ParseRes<Expr> {
         match self.peek()?.kind {
             TokenKind::Lambda => {
@@ -571,13 +596,12 @@ impl Parser {
                 Ok(Expr::r#if(e1, e2, e3))
             }
             _ => {
-                let mut e0 = self.expr_atom()?;
-                let mut state = self.save();
-                while let Ok(e) = self.expr_atom() {
-                    e0 = Expr::app(e0, e);
-                    state = self.save();
+                let mut e0 = self.expr_term()?;
+                while let Ok(op) = self.peek_operator() {
+                    self.proceed();
+                    let e = self.expr_atom()?;
+                    e0 = Expr::bin_op(op, e0, e); // Assumes left-associativity.
                 }
-                self.restore(state);
                 Ok(e0)
             }
         }

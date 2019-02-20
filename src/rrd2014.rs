@@ -54,6 +54,13 @@ pub enum Expr {
     Int(isize),
     Bool(bool),
     If(Box<Expr>, Box<Expr>, Box<Expr>),
+    BinOp(BinOp, Box<Expr>, Box<Expr>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum BinOp {
+    LessThan,
+    GreaterThan,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1226,6 +1233,10 @@ impl Expr {
         Expr::If(Box::new(e1), Box::new(e2), Box::new(e3))
     }
 
+    fn bin_op(op: BinOp, e1: Expr, e2: Expr) -> Self {
+        Expr::BinOp(op, Box::new(e1), Box::new(e2))
+    }
+
     fn infer(&self, env: &mut Env) -> Result<(ITerm, IType, Subst), TypeError> {
         use Expr::*;
         use IKind::*;
@@ -1303,6 +1314,32 @@ impl Expr {
                     ty2,
                     s1.compose(u1).compose(s2).compose(s3).compose(u2),
                 ))
+            }
+            BinOp(ref op, ref e1, ref e2) => {
+                use self::BinOp::*;
+                match op {
+                    LessThan | GreaterThan => {
+                        let (mut t1, ty1, s1) = e1.infer(env)?;
+                        let u1 = env
+                            .unify(vec![(ty1, IType::Int)])
+                            .map_err(|e| TypeError::Unification(self.clone(), e))?;
+                        let (mut t2, ty2, s2) = e2.infer(env)?;
+                        let u2 = env
+                            .unify(vec![(ty2, IType::Int)])
+                            .map_err(|e| TypeError::Unification(self.clone(), e))?;
+
+                        t1.apply(&u1);
+                        t1.apply(&s2);
+                        t1.apply(&u2);
+
+                        t2.apply(&u2);
+                        Ok((
+                            ITerm::bin_op(op.clone(), t1, t2),
+                            IType::Bool,
+                            s1.compose(u1).compose(s2).compose(u2),
+                        ))
+                    }
+                }
             }
         }
     }

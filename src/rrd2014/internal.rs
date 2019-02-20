@@ -10,6 +10,8 @@ use std::iter::FromIterator;
 
 use failure::Fail;
 
+use super::BinOp;
+
 pub mod dynamic;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -81,6 +83,7 @@ pub enum Term {
     Int(isize),
     Bool(bool),
     If(Box<Term>, Box<Term>, Box<Term>),
+    BinOp(BinOp, Box<Term>, Box<Term>),
 
     /// Just a syntax sugar for `App(Abs(ty, t2), t1)`, but convenient for debugging and it reduces
     /// the size of terms.
@@ -261,6 +264,10 @@ impl Shift for Term {
                 t2.shift_above(c, d);
                 t3.shift_above(c, d);
             }
+            BinOp(_, ref mut t1, ref mut t2) => {
+                t1.shift_above(c, d);
+                t2.shift_above(c, d);
+            }
             Let(ref mut t1, ref mut t2) => {
                 t1.shift_above(c, d);
                 t2.shift_above(c, d);
@@ -411,6 +418,10 @@ impl Substitution for Term {
                 t1.apply(s);
                 t2.apply(s);
                 t3.apply(s);
+            }
+            BinOp(_, ref mut t1, ref mut t2) => {
+                t1.apply(s);
+                t2.apply(s);
             }
             Let(ref mut t1, ref mut t2) => {
                 t1.apply(s);
@@ -727,6 +738,14 @@ impl Type {
 
     pub fn record<I: IntoIterator<Item = (Label, Type)>>(iter: I) -> Self {
         Type::Record(Record::from_iter(iter))
+    }
+
+    pub fn must_be_int(&self) -> Result<(), TypeError> {
+        if let Type::Int = *self {
+            Ok(())
+        } else {
+            Err(TypeError::TypeMismatch(self.clone(), Type::Int))
+        }
     }
 
     /// Creates an n-ary existential type.
@@ -1094,6 +1113,10 @@ impl Term {
 
     pub fn r#if(t1: Term, t2: Term, t3: Term) -> Self {
         Term::If(Box::new(t1), Box::new(t2), Box::new(t3))
+    }
+
+    pub fn bin_op(op: BinOp, t1: Term, t2: Term) -> Self {
+        Term::BinOp(op, Box::new(t1), Box::new(t2))
     }
 
     /// Creates a successive projection.
@@ -1523,6 +1546,18 @@ impl Term {
                 }
                 ty => Err(TypeError::NotBool(ty)),
             },
+            BinOp(ref op, ref t1, ref t2) => {
+                use self::BinOp::*;
+                let ty1 = t1.type_of(ctx)?.reduce();
+                let ty2 = t2.type_of(ctx)?.reduce();
+                match *op {
+                    LessThan | GreaterThan => {
+                        ty1.must_be_int()?;
+                        ty2.must_be_int()?;
+                        Ok(Type::Bool)
+                    }
+                }
+            }
             Let(ref t1, ref t2) => {
                 let ty1 = t1.type_of(ctx)?;
                 ctx.insert_value(Cow::Owned(ty1));

@@ -45,6 +45,14 @@ impl Value {
     fn pack(v: Value) -> Self {
         Value::Pack(Box::new(v))
     }
+
+    fn get_int(self) -> Fallible<isize> {
+        if let Value::Int(n) = self {
+            Ok(n)
+        } else {
+            bail!("not integer: {:?}", self)
+        }
+    }
 }
 
 impl DynEnv {
@@ -123,6 +131,16 @@ impl DynEnv {
                 Value::Bool(false) => self.reduce(*t3),
                 v => bail!("not boolean: {:?}", v),
             },
+            BinOp(op, t1, t2) => {
+                use super::BinOp::*;
+                let n1 = self.reduce(*t1)?.get_int()?;
+                let n2 = self.reduce(*t2)?.get_int()?;
+                let b = match op {
+                    LessThan => n1 < n2,
+                    GreaterThan => n1 > n2,
+                };
+                Ok(Value::Bool(b))
+            }
             Let(t1, t2) => {
                 let v = self.reduce(*t1)?;
                 self.insert(v);
