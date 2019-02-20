@@ -8,11 +8,44 @@ use failure::Fallible;
 
 use super::*;
 
-#[derive(Clone, Debug, Default, PartialEq)]
-struct Position {
-    line: usize,
-    column: usize,
+mod position {
+    use std::fmt;
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct Position {
+        line: usize,
+        column: usize,
+    }
+
+    impl Default for Position {
+        fn default() -> Self {
+            Position { line: 1, column: 1 }
+        }
+    }
+
+    impl fmt::Display for Position {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            write!(f, "{}:{}", self.line, self.column)
+        }
+    }
+
+    impl Position {
+        pub fn new(line: usize, column: usize) -> Self {
+            Position { line, column }
+        }
+
+        pub fn new_line(&mut self) {
+            self.line += 1;
+            self.column = 1;
+        }
+
+        pub fn inc_column(&mut self) {
+            self.column += 1;
+        }
+    }
 }
+
+use position::Position;
 
 #[derive(Clone, Debug, PartialEq)]
 enum TokenKind {
@@ -56,8 +89,7 @@ struct Token {
 }
 
 struct Lexer {
-    line: usize,
-    column: usize,
+    pos: Position,
     src: Peekable<IntoIter<char>>,
     filename: Option<String>,
 }
@@ -74,14 +106,14 @@ enum LexError {
     #[fail(display = "no token")]
     NoToken,
 
-    #[fail(display = "unexpected end of file: line {}, column {}", _0, _1)]
-    UnexpectedEOF(usize, usize),
+    #[fail(display = "{}: unexpected end of file", _0)]
+    UnexpectedEOF(Position),
 
-    #[fail(display = "{}:{}: illegal character: {:?}", _0, _1, _2)]
-    IllegalCharacter(usize, usize, char),
+    #[fail(display = "{}: illegal character: {:?}", _0, _1)]
+    IllegalCharacter(Position, char),
 
-    #[fail(display = "{}:{}: expected {}, but found {:?}", _0, _1, _2, _3)]
-    Expected(usize, usize, String, char),
+    #[fail(display = "{}: expected {}, but found {:?}", _0, _1, _2)]
+    Expected(Position, String, char),
 }
 
 #[derive(Debug, Fail, PartialEq)]
@@ -89,11 +121,11 @@ enum ParseError {
     #[fail(display = "unexpected end of file")]
     UnexpectedEOF,
 
-    #[fail(display = "{}:{}: expected {}, but found {:?}", _0, _1, _2, _3)]
-    Expected(usize, usize, String, TokenKind),
+    #[fail(display = "{}: expected {}, but found {:?}", _0, _1, _2)]
+    Expected(Position, String, TokenKind),
 
-    #[fail(display = "{}:{}: expected {:?}, but found {:?}", _0, _1, _2, _3)]
-    ExpectedToken(usize, usize, TokenKind, TokenKind),
+    #[fail(display = "{}: expected {:?}, but found {:?}", _0, _1, _2)]
+    ExpectedToken(Position, TokenKind, TokenKind),
 }
 
 type Res<T> = Result<T, LexError>;
@@ -109,8 +141,7 @@ impl TokenKind {
 impl Lexer {
     fn new(src: Vec<char>) -> Self {
         Lexer {
-            line: 0,
-            column: 0,
+            pos: Position::default(),
             src: src.into_iter().peekable(),
             filename: None,
         }
@@ -118,8 +149,7 @@ impl Lexer {
 
     fn with_filename(src: Vec<char>, filename: String) -> Self {
         Lexer {
-            line: 0,
-            column: 0,
+            pos: Position::default(),
             src: src.into_iter().peekable(),
             filename: Some(filename),
         }
@@ -128,26 +158,24 @@ impl Lexer {
     fn proceed(&mut self) {
         if let Some(ch) = self.src.next() {
             if ch == '\n' {
-                self.line += 1;
-                self.column = 0;
+                self.pos.new_line();
             } else {
-                self.column += 1;
+                self.pos.inc_column();
             }
         }
     }
 
     fn next(&mut self) -> Res<char> {
         self.next_opt()
-            .ok_or_else(|| LexError::UnexpectedEOF(self.line, self.column))
+            .ok_or_else(|| LexError::UnexpectedEOF(self.pos.clone()))
     }
 
     fn next_opt(&mut self) -> Option<char> {
         if let Some(ch) = self.src.next() {
             if ch == '\n' {
-                self.line += 1;
-                self.column = 0;
+                self.pos.new_line();
             } else {
-                self.column += 1;
+                self.pos.inc_column();
             }
             Some(ch)
         } else {
@@ -160,10 +188,7 @@ impl Lexer {
     }
 
     fn pos(&self) -> Position {
-        Position {
-            line: self.line,
-            column: self.column,
-        }
+        self.pos.clone()
     }
 
     fn token(&self, kind: TokenKind) -> Token {
@@ -207,7 +232,7 @@ impl Lexer {
             '\u{03bb}' => proceeding!(self.token(TokenKind::Lambda)),
             ch if ch.is_ascii_digit() => self.int(),
             ch if ch.is_ascii_alphabetic() => self.ident(),
-            ch => Err(LexError::IllegalCharacter(self.line, self.column, ch)),
+            ch => Err(LexError::IllegalCharacter(self.pos.clone(), ch)),
         }
     }
 
@@ -217,13 +242,8 @@ impl Lexer {
                 kind: TokenKind::Arrow,
                 pos,
             }),
-            Some(ch) => Err(LexError::Expected(
-                self.line,
-                self.column,
-                '>'.to_string(),
-                ch,
-            )),
-            None => Err(LexError::UnexpectedEOF(self.line, self.column)),
+            Some(ch) => Err(LexError::Expected(self.pos.clone(), '>'.to_string(), ch)),
+            None => Err(LexError::UnexpectedEOF(self.pos.clone())),
         }
     }
 
@@ -334,11 +354,11 @@ fn keyword_or_ident(s: String) -> TokenKind {
 
 impl ParseError {
     fn expected(s: &str, token: Token) -> Self {
-        ParseError::Expected(token.pos.line, token.pos.column, s.to_string(), token.kind)
+        ParseError::Expected(token.pos, s.to_string(), token.kind)
     }
 
     fn expected_token(kind: TokenKind, token: Token) -> Self {
-        ParseError::ExpectedToken(token.pos.line, token.pos.column, kind, token.kind)
+        ParseError::ExpectedToken(token.pos, kind, token.kind)
     }
 }
 
@@ -392,12 +412,7 @@ impl Parser {
         let token = self.next()?;
         match token.kind {
             TokenKind::Mono => Ok(Kind::Mono),
-            k => Err(ParseError::Expected(
-                token.pos.line,
-                token.pos.column,
-                "kind".to_string(),
-                k,
-            )),
+            _ => Err(ParseError::expected("kind", token)),
         }
     }
 
@@ -852,7 +867,7 @@ mod tests {
             l.lex(),
             Ok(Token {
                 kind: TokenKind::Lambda,
-                pos: Position { line: 0, column: 0 }
+                pos: Default::default(),
             })
         );
     }
@@ -864,7 +879,7 @@ mod tests {
             l.lex(),
             Ok(Token {
                 kind: TokenKind::IntLit(19),
-                pos: Position { line: 0, column: 0 }
+                pos: Default::default(),
             })
         );
     }
@@ -877,7 +892,7 @@ mod tests {
             l.lex(),
             Ok(Token {
                 kind: TokenKind::Struct,
-                pos: Position { line: 0, column: 0 }
+                pos: Default::default(),
             })
         );
 
@@ -885,7 +900,7 @@ mod tests {
             l.lex(),
             Ok(Token {
                 kind: TokenKind::End,
-                pos: Position { line: 0, column: 7 }
+                pos: Position::new(1, 8)
             })
         );
     }
@@ -1021,19 +1036,19 @@ mod tests {
         let mut p = Parser::new(vec![
             Token {
                 kind: TokenKind::Type,
-                pos: Position { line: 0, column: 0 },
+                pos: Default::default(),
             },
             Token {
                 kind: TokenKind::Ident("t".to_string()),
-                pos: Position { line: 0, column: 5 },
+                pos: Default::default(),
             },
             Token {
                 kind: TokenKind::Equal,
-                pos: Position { line: 0, column: 7 },
+                pos: Default::default(),
             },
             Token {
                 kind: TokenKind::Int,
-                pos: Position { line: 0, column: 9 },
+                pos: Default::default(),
             },
         ]);
         assert_eq!(p.binding(), Ok(Binding::Type(Ident::from("t"), Type::Int)));
@@ -1041,19 +1056,19 @@ mod tests {
         let mut p = Parser::new(vec![
             Token {
                 kind: TokenKind::Val,
-                pos: Position { line: 0, column: 0 },
+                pos: Default::default(),
             },
             Token {
                 kind: TokenKind::Ident("x".to_string()),
-                pos: Position { line: 0, column: 4 },
+                pos: Default::default(),
             },
             Token {
                 kind: TokenKind::Equal,
-                pos: Position { line: 0, column: 6 },
+                pos: Default::default(),
             },
             Token {
                 kind: TokenKind::IntLit(3),
-                pos: Position { line: 0, column: 8 },
+                pos: Default::default(),
             },
         ]);
         assert_eq!(
@@ -1096,11 +1111,11 @@ mod tests {
         let mut p = Parser::new(vec![
             Token {
                 kind: TokenKind::Struct,
-                pos: Position { line: 0, column: 0 },
+                pos: Default::default(),
             },
             Token {
                 kind: TokenKind::End,
-                pos: Position { line: 0, column: 7 },
+                pos: Default::default(),
             },
         ]);
         assert_eq!(p.module(), Ok(Module::Seq(vec![])));
@@ -1108,39 +1123,27 @@ mod tests {
         let mut p = Parser::new(vec![
             Token {
                 kind: TokenKind::Struct,
-                pos: Position { line: 0, column: 0 },
+                pos: Default::default(),
             },
             Token {
                 kind: TokenKind::Type,
-                pos: Position { line: 0, column: 7 },
+                pos: Default::default(),
             },
             Token {
                 kind: TokenKind::Ident("t".to_string()),
-                pos: Position {
-                    line: 0,
-                    column: 12,
-                },
+                pos: Default::default(),
             },
             Token {
                 kind: TokenKind::Equal,
-                pos: Position {
-                    line: 0,
-                    column: 14,
-                },
+                pos: Default::default(),
             },
             Token {
                 kind: TokenKind::Int,
-                pos: Position {
-                    line: 0,
-                    column: 16,
-                },
+                pos: Default::default(),
             },
             Token {
                 kind: TokenKind::End,
-                pos: Position {
-                    line: 0,
-                    column: 20,
-                },
+                pos: Default::default(),
             },
         ]);
         assert_eq!(
