@@ -529,6 +529,7 @@ impl From<super::SemanticSig> for Type {
                     .collect(),
             ),
             FunctorSig(u) => u.into(),
+            Applicative(u) => u.into(),
         }
     }
 }
@@ -553,6 +554,12 @@ impl<T: Into<Type>> From<super::Universal<T>> for Type {
 
 impl From<super::Fun> for Type {
     fn from(f: super::Fun) -> Self {
+        Type::fun(f.0.into(), f.1.into())
+    }
+}
+
+impl From<super::Applicative> for Type {
+    fn from(f: super::Applicative) -> Self {
         Type::fun(f.0.into(), f.1.into())
     }
 }

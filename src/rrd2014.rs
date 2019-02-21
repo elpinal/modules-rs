@@ -91,6 +91,7 @@ pub enum Sig {
     Path(Path),
     Seq(Vec<Decl>),
     Generative(Ident, Box<Sig>, Box<Sig>),
+    Applicative(Ident, Box<Sig>, Box<Sig>),
     Where(Box<Sig>, Proj<Ident>, Type),
 }
 
@@ -132,12 +133,16 @@ pub type AbstractSig = Existential<SemanticSig>;
 pub struct Fun(SemanticSig, AbstractSig);
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct Applicative(SemanticSig, SemanticSig);
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum SemanticSig {
     AtomicTerm(IType),
     AtomicType(IType, IKind),
     AtomicSig(Box<AbstractSig>),
     StructureSig(HashMap<Label, SemanticSig>),
     FunctorSig(Universal<Box<Fun>>),
+    Applicative(Universal<Box<Applicative>>),
 }
 
 enum SemanticTerm {
@@ -286,6 +291,13 @@ impl Substitution for Fun {
     }
 }
 
+impl Substitution for Applicative {
+    fn apply(&mut self, s: &Subst) {
+        self.0.apply(s);
+        self.1.apply(s);
+    }
+}
+
 impl Substitution for SemanticSig {
     fn apply(&mut self, s: &Subst) {
         use SemanticSig::*;
@@ -299,6 +311,7 @@ impl Substitution for SemanticSig {
             AtomicSig(ref mut asig) => asig.apply(s),
             StructureSig(ref mut m) => m.values_mut().for_each(|ssig| ssig.apply(s)),
             FunctorSig(ref mut u) => u.apply(s),
+            Applicative(ref mut u) => u.apply(s),
         }
     }
 }
@@ -350,6 +363,13 @@ impl Shift for Fun {
     }
 }
 
+impl Shift for Applicative {
+    fn shift_above(&mut self, c: usize, d: isize) {
+        self.0.shift_above(c, d);
+        self.1.shift_above(c, d);
+    }
+}
+
 impl Shift for SemanticSig {
     fn shift_above(&mut self, c: usize, d: isize) {
         use SemanticSig::*;
@@ -362,6 +382,7 @@ impl Shift for SemanticSig {
             AtomicSig(ref mut asig) => asig.shift_above(c, d),
             StructureSig(ref mut m) => m.values_mut().for_each(|ssig| ssig.shift_above(c, d)),
             FunctorSig(ref mut u) => u.shift_above(c, d),
+            Applicative(ref mut u) => u.shift_above(c, d),
         }
     }
 }
@@ -398,6 +419,14 @@ impl Fgtv for Fun {
     }
 }
 
+impl Fgtv for Applicative {
+    fn fgtv(&self) -> HashSet<usize> {
+        let mut s = self.0.fgtv();
+        s.extend(self.1.fgtv());
+        s
+    }
+}
+
 impl Fgtv for SemanticSig {
     fn fgtv(&self) -> HashSet<usize> {
         use SemanticSig::*;
@@ -411,6 +440,7 @@ impl Fgtv for SemanticSig {
             AtomicSig(ref asig) => asig.fgtv(),
             StructureSig(ref m) => m.values().flat_map(|ssig| ssig.fgtv()).collect(),
             FunctorSig(ref u) => u.fgtv(),
+            Applicative(ref u) => u.fgtv(),
         }
     }
 }
@@ -436,6 +466,10 @@ trait Subtype {
 
 trait Normalize {
     fn normalize(self) -> Self;
+}
+
+trait Lift {
+    fn lifted_by(self, another: &Self) -> Self;
 }
 
 #[derive(Debug, Fail, PartialEq)]
@@ -510,6 +544,21 @@ impl SemanticSig {
             SemanticSig::FunctorSig(u) => Ok(u.map(|f| *f)),
             _ => Err(SemanticSigError::Functor(self)),
         }
+    }
+}
+
+impl Lift for Vec<(IKind, StemFrom)> {
+    fn lifted_by(self, another: &Self) -> Self {
+        self.into_iter()
+            .map(|(k, sf)| {
+                (
+                    another
+                        .iter()
+                        .fold(k, |acc, p| IKind::fun(p.0.clone(), acc)),
+                    sf,
+                )
+            })
+            .collect()
     }
 }
 
@@ -659,6 +708,30 @@ impl Elaboration for Sig {
                     Existential::from(SemanticSig::FunctorSig(
                         Universal::from(asig1).map(|ssig| Box::new(Fun(ssig, asig2))),
                     )),
+                    s1.compose(s2),
+                ))
+            }
+            Applicative(ref id, ref domain, ref range) => {
+                let enter_state = env.get_state();
+                let (mut asig1, s1) = domain.elaborate(env)?;
+                env.insert_types(asig1.0.qs.clone().into_iter().map(|(k, s)| (k, Some(s))));
+                env.insert_value(Name::from(id.clone()), asig1.0.body.clone());
+                let (asig2, s2) = range.elaborate(env)?;
+                env.drop_values_state(1, enter_state);
+                env.drop_types(asig1.0.qs.len());
+                let mut ssig2 = asig2.0.body;
+                let len2 = asig2.0.qs.len();
+                let qs = asig2.0.qs.lifted_by(&asig1.0.qs);
+                asig1.shift(isize::try_from(len2).unwrap());
+                ssig2.skolemize(asig1.0.qs.len(), len2);
+                Ok((
+                    Existential(Quantified {
+                        qs,
+                        body: SemanticSig::Applicative(
+                            Universal::from(asig1)
+                                .map(|ssig1| Box::new(self::Applicative(ssig1, ssig2))),
+                        ),
+                    }),
                     s1.compose(s2),
                 ))
             }
@@ -1119,6 +1192,17 @@ impl Normalize for SemanticSig {
                     body: Box::new(f),
                 }))
             }
+            Applicative(u) => {
+                let self::Applicative(ssig1, ssig2) = *u.0.body;
+                let ssig1 = ssig1.normalize();
+                let (ks, s) = ssig1.sort_quantifiers(u.0.qs);
+                let mut f = self::Applicative(ssig1, ssig2.normalize());
+                f.apply(&s);
+                Applicative(Universal(Quantified {
+                    qs: ks,
+                    body: Box::new(f),
+                }))
+            }
         }
     }
 }
@@ -1470,6 +1554,27 @@ impl SemanticSig {
         }
         (Vec::from(ks), Subst::from_iter(m))
     }
+
+    fn skolemize(&mut self, m: usize, n: usize) {
+        use internal::Variable::Variable as V;
+
+        // TODO: `Subst::compose` may be useful.
+        let s = Subst::from_iter(
+            (0..n)
+                .map(|i| (i, i + m))
+                .chain((0..m).map(|i| (n + i, i)))
+                .map(|(i, j)| (V(i), IType::var(j))),
+        );
+        self.apply(&s);
+
+        let s = Subst::from_iter((0..n).map(|i| {
+            (
+                V(m + i),
+                (0..m).fold(IType::var(m + i), |acc, j| IType::app(acc, IType::var(j))),
+            )
+        }));
+        self.apply(&s);
+    }
 }
 
 impl Sig {
@@ -1479,6 +1584,10 @@ impl Sig {
 
     fn generative(id: Ident, sig1: Sig, sig2: Sig) -> Self {
         Sig::Generative(id, Box::new(sig1), Box::new(sig2))
+    }
+
+    fn applicative(id: Ident, sig1: Sig, sig2: Sig) -> Self {
+        Sig::Applicative(id, Box::new(sig1), Box::new(sig2))
     }
 
     fn r#where(sig: Sig, p: Proj<Ident>, ty: Type) -> Self {
@@ -2373,6 +2482,118 @@ mod tests {
                     (Variable(2), Type::var(0)),
                 ])
             )
+        );
+    }
+
+    #[test]
+    fn lifted_by() {
+        use IKind as Kind;
+        use IKind::Mono;
+
+        fn sf(s: &str) -> StemFrom {
+            StemFrom::from(Ident::from(s))
+        }
+
+        assert_eq!(vec![].lifted_by(&vec![]), vec![]);
+
+        assert_eq!(vec![].lifted_by(&vec![(Mono, sf("b"))]), vec![]);
+
+        assert_eq!(
+            vec![(Mono, sf("a"))].lifted_by(&vec![]),
+            vec![(Mono, sf("a"))]
+        );
+
+        assert_eq!(
+            vec![(Mono, sf("a"))].lifted_by(&vec![(Mono, sf("b"))]),
+            vec![(Kind::fun(Mono, Mono), sf("a"))]
+        );
+
+        assert_eq!(
+            vec![(Mono, sf("a"))]
+                .lifted_by(&vec![(Mono, sf("b")), (Kind::fun(Mono, Mono), sf("c"))]),
+            vec![(
+                Kind::fun(Kind::fun(Mono, Mono), Kind::fun(Mono, Mono)),
+                sf("a")
+            )]
+        );
+
+        assert_eq!(
+            vec![(Mono, sf("a"))]
+                .lifted_by(&vec![(Kind::fun(Mono, Mono), sf("c")), (Mono, sf("b"))]),
+            vec![(
+                Kind::fun(Mono, Kind::fun(Kind::fun(Mono, Mono), Mono)),
+                sf("a")
+            )]
+        );
+
+        assert_eq!(
+            vec![(Mono, sf("a")), (Kind::fun(Mono, Mono), sf("d"))]
+                .lifted_by(&vec![(Kind::fun(Mono, Mono), sf("c")), (Mono, sf("b"))]),
+            vec![
+                (
+                    Kind::fun(Mono, Kind::fun(Kind::fun(Mono, Mono), Mono)),
+                    sf("a")
+                ),
+                (
+                    Kind::fun(
+                        Mono,
+                        Kind::fun(Kind::fun(Mono, Mono), Kind::fun(Mono, Mono))
+                    ),
+                    sf("d")
+                )
+            ]
+        );
+    }
+
+    macro_rules! assert_skolemize {
+        ($ssig:expr, $m:expr, $n:expr, $r:expr) => {{
+            let mut ssig = $ssig;
+            ssig.skolemize($m, $n);
+            assert_eq!(ssig, $r);
+        }};
+    }
+
+    #[test]
+    fn skolemize() {
+        use IType::Int;
+        use SemanticSig::*;
+
+        let var = IType::var;
+        let app = IType::app;
+
+        assert_skolemize!(AtomicTerm(Int), 0, 0, AtomicTerm(Int));
+
+        assert_skolemize!(AtomicTerm(var(0)), 0, 0, AtomicTerm(var(0)));
+        assert_skolemize!(AtomicTerm(var(0)), 1, 0, AtomicTerm(var(0)));
+        assert_skolemize!(AtomicTerm(var(0)), 0, 1, AtomicTerm(var(0)));
+        assert_skolemize!(AtomicTerm(var(0)), 1, 1, AtomicTerm(app(var(1), var(0))));
+
+        assert_skolemize!(AtomicTerm(var(1)), 0, 0, AtomicTerm(var(1)));
+        assert_skolemize!(AtomicTerm(var(1)), 1, 0, AtomicTerm(var(1)));
+        assert_skolemize!(AtomicTerm(var(1)), 0, 1, AtomicTerm(var(1)));
+        assert_skolemize!(AtomicTerm(var(1)), 1, 1, AtomicTerm(var(0)));
+
+        assert_skolemize!(
+            AtomicTerm(var(0)),
+            2,
+            1,
+            AtomicTerm(app(app(var(2), var(0)), var(1)))
+        );
+        assert_skolemize!(AtomicTerm(var(0)), 1, 2, AtomicTerm(app(var(1), var(0))));
+        assert_skolemize!(
+            AtomicTerm(var(0)),
+            2,
+            2,
+            AtomicTerm(app(app(var(2), var(0)), var(1)))
+        );
+
+        assert_skolemize!(AtomicTerm(var(1)), 2, 1, AtomicTerm(var(0)));
+        assert_skolemize!(AtomicTerm(var(1)), 1, 2, AtomicTerm(app(var(2), var(0))));
+        assert_skolemize!(
+            AtomicTerm(var(1)),
+            2,
+            2,
+            AtomicTerm(app(app(var(3), var(0)), var(1)))
         );
     }
 }
