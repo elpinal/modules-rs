@@ -1156,10 +1156,13 @@ impl Term {
         Term::BinOp(op, Box::new(t1), Box::new(t2))
     }
 
-    pub fn abs_env<S>(env: &Env<Type, S>, t: Term) -> Self {
+    pub fn abs_env<T, S>(env: &Env<T, S>, t: Term) -> Self
+    where
+        T: Clone + Into<Type>,
+    {
         let t = env.venv.iter().rfold(t, |acc, ty| {
             if let Some(ref ty) = *ty {
-                Term::abs(ty.clone(), acc)
+                Term::abs(ty.clone().into(), acc)
             } else {
                 acc
             }
@@ -1169,7 +1172,10 @@ impl Term {
             .rfold(t, |acc, p| Term::poly(Some(p.0.clone()), acc))
     }
 
-    pub fn abs_env_purity<S>(env: &Env<Type, S>, p: Purity, t: Term) -> Self {
+    pub fn abs_env_purity<T, S>(env: &Env<T, S>, p: Purity, t: Term) -> Self
+    where
+        T: Clone + Into<Type>,
+    {
         if p.is_pure() {
             Term::abs_env(env, t)
         } else {
@@ -1177,7 +1183,7 @@ impl Term {
         }
     }
 
-    pub fn app_env<S>(t: Term, env: &Env<Type, S>) -> Self {
+    pub fn app_env<T, S>(t: Term, env: &Env<T, S>) -> Self {
         let t = (0..env.tenv.len()).rfold(t, |acc, n| Term::inst(acc, Some(Type::var(n))));
         env.venv.iter().rev().enumerate().rfold(t, |acc, (i, ty)| {
             if ty.is_some() {
@@ -1188,7 +1194,7 @@ impl Term {
         })
     }
 
-    pub fn app_env_purity<S>(t: Term, env: &Env<Type, S>, p: Purity) -> Self {
+    pub fn app_env_purity<T, S>(t: Term, env: &Env<T, S>, p: Purity) -> Self {
         if p.is_pure() {
             Term::app_env(t, env)
         } else {
