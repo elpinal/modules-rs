@@ -157,6 +157,12 @@ struct BindingInformation {
     w: Vec<ITerm>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Purity {
+    Pure,
+    Impure,
+}
+
 type Env = internal::Env<SemanticSig, Option<StemFrom>>;
 
 #[derive(Debug, Fail, PartialEq)]
@@ -1670,6 +1676,23 @@ impl Functional for Applicative {
 
     fn ref_function(&self) -> (&SemanticSig, &Self::Range) {
         (&self.0, &self.1)
+    }
+}
+
+impl Purity {
+    /// # Examples
+    ///
+    /// ```
+    /// use modules::rrd2014::*;
+    /// use Purity::*;
+    ///
+    /// assert_eq!(Pure.join(Pure), Pure);
+    /// assert_eq!(Pure.join(Impure), Impure);
+    /// assert_eq!(Impure.join(Pure), Impure);
+    /// assert_eq!(Impure.join(Impure), Impure);
+    /// ```
+    pub fn join(self, p: Purity) -> Self {
+        self.max(p)
     }
 }
 
