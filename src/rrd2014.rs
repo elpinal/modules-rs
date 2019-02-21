@@ -458,10 +458,10 @@ pub fn elaborate(m: Module) -> Result<(ITerm, AbstractSig, Vec<IKind>), TypeErro
     Ok((triple.0, triple.1, env.get_generated_type_env()))
 }
 
-trait Subtype {
+trait Subtype<RHS = Self> {
     type Error;
 
-    fn subtype_of(&self, env: &mut Env, another: &Self) -> Result<ITerm, Self::Error>;
+    fn subtype_of(&self, env: &mut Env, another: &RHS) -> Result<ITerm, Self::Error>;
 }
 
 trait Normalize {
@@ -1043,6 +1043,24 @@ impl Subtype for IType {
     }
 }
 
+impl Subtype<AbstractSig> for SemanticSig {
+    type Error = TypeError;
+
+    fn subtype_of(&self, env: &mut Env, another: &AbstractSig) -> Result<ITerm, Self::Error> {
+        let ty: IType = self.clone().into();
+        let (t, tys) = self.r#match(env, another)?;
+        Ok(ITerm::abs(
+            ty,
+            ITerm::pack(
+                ITerm::app(t, ITerm::var(0)),
+                tys,
+                another.0.qs.iter().map(|p| p.0.clone()),
+                another.0.body.clone().into(),
+            ),
+        ))
+    }
+}
+
 impl Subtype for SemanticSig {
     type Error = TypeError;
 
@@ -1094,20 +1112,23 @@ impl Subtype for SemanticSig {
                 Ok(ITerm::abs(IType::from(self.clone()), ITerm::record(m)))
             }
             (&FunctorSig(ref u1), &FunctorSig(ref u2)) => subtype_functor(env, u1, u2),
+            (&Applicative(ref u1), &FunctorSig(ref u2)) => subtype_functor(env, u1, u2),
             (&Applicative(ref u1), &Applicative(ref u2)) => subtype_functor(env, u1, u2),
             _ => Err(TypeError::NotSubsignature(self.clone(), another.clone())),
         }
     }
 }
 
-fn subtype_functor<T>(
+fn subtype_functor<T, U>(
     env: &mut Env,
     u1: &Universal<Box<T>>,
-    u2: &Universal<Box<T>>,
+    u2: &Universal<Box<U>>,
 ) -> Result<ITerm, TypeError>
 where
     T: Functional + Clone + Into<IType>,
-    TypeError: From<<<T as Functional>::Range as Subtype>::Error>,
+    U: Functional + Clone + Into<IType>,
+    TypeError: From<<T::Range as Subtype<U::Range>>::Error>,
+    T::Range: Subtype<U::Range>,
 {
     env.insert_types(u2.0.qs.clone().into_iter().map(|(k, s)| (k, Some(s))));
     let (ssig1, mut asig1) = u1.0.body.clone().get_function();
@@ -1157,6 +1178,7 @@ impl Subtype for AbstractSig {
         env.insert_types(self.0.qs.clone().into_iter().map(|(k, s)| (k, Some(s))));
         let ty: IType = self.clone().into();
         let (t, tys) = self.0.body.r#match(env, another)?;
+        // FIXME: drop types from `env`.
         Ok(ITerm::abs(
             ty,
             ITerm::unpack(
