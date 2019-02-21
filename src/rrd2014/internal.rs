@@ -763,6 +763,19 @@ impl Type {
         (0..env.tenv.len()).rfold(ty, |acc, n| Type::app(acc, Type::var(n)))
     }
 
+    pub fn forall_env<S>(env: &Env<Type, S>, ty: Type) -> Self {
+        let ty = env.venv.iter().rfold(ty, |acc, ty| {
+            if let Some(ref ty) = *ty {
+                Type::fun(ty.clone(), acc)
+            } else {
+                acc
+            }
+        });
+        env.tenv
+            .iter()
+            .rfold(ty, |acc, p| Type::forall(Some(p.0.clone()), acc))
+    }
+
     pub fn must_be_int(&self) -> Result<(), TypeError> {
         if let Type::Int = *self {
             Ok(())
@@ -1140,6 +1153,30 @@ impl Term {
 
     pub fn bin_op(op: BinOp, t1: Term, t2: Term) -> Self {
         Term::BinOp(op, Box::new(t1), Box::new(t2))
+    }
+
+    pub fn abs_env<S>(env: &Env<Type, S>, t: Term) -> Self {
+        let t = env.venv.iter().rfold(t, |acc, ty| {
+            if let Some(ref ty) = *ty {
+                Term::abs(ty.clone(), acc)
+            } else {
+                acc
+            }
+        });
+        env.tenv
+            .iter()
+            .rfold(t, |acc, p| Term::poly(Some(p.0.clone()), acc))
+    }
+
+    pub fn app_env<S>(t: Term, env: &Env<Type, S>) -> Self {
+        let t = (0..env.tenv.len()).rfold(t, |acc, n| Term::inst(acc, Some(Type::var(n))));
+        env.venv.iter().rev().enumerate().rfold(t, |acc, (i, ty)| {
+            if ty.is_some() {
+                Term::app(acc, Term::var(i))
+            } else {
+                acc
+            }
+        })
     }
 
     /// Creates a successive projection.
