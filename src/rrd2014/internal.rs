@@ -105,7 +105,7 @@ pub struct Env<T, S> {
     /// A name-to-index map.
     nmap: HashMap<Name, usize>,
 
-    /// A counter.
+    /// A counter to generate fresh type variables for type inference.
     n: usize,
 }
 
@@ -723,6 +723,12 @@ impl Kind {
 
     pub fn equal(&self, k: &Kind) -> bool {
         self == k
+    }
+
+    pub fn fun_env<T, S>(env: &Env<T, S>, k: Kind) -> Self {
+        env.tenv
+            .iter()
+            .rfold(k, |acc, p| Kind::fun(p.0.clone(), acc))
     }
 }
 
@@ -2367,6 +2373,55 @@ mod tests {
         assert_eq!(
             close!(Type::fun(Var(v), Type::var(0))),
             Type::fun(Var(v), Type::var(0))
+        );
+    }
+
+    #[test]
+    fn kind_fun_env() {
+        use Kind::*;
+
+        let fun = Kind::fun;
+
+        assert_eq!(Kind::fun_env::<Type, ()>(&Env::default(), Mono), Mono);
+
+        assert_eq!(
+            Kind::fun_env::<Type, _>(
+                &Env {
+                    tenv: vec![(Mono, ())],
+                    ..Default::default()
+                },
+                Mono
+            ),
+            fun(Mono, Mono)
+        );
+
+        assert_eq!(
+            Kind::fun_env::<Type, _>(
+                &Env {
+                    tenv: vec![(fun(Mono, Mono), ()), (Mono, ())],
+                    ..Default::default()
+                },
+                Mono
+            ),
+            fun(fun(Mono, Mono), fun(Mono, Mono))
+        );
+
+        assert_eq!(
+            Kind::fun_env::<Type, _>(
+                &Env {
+                    tenv: vec![
+                        (fun(Mono, Mono), ()),
+                        (fun(Mono, fun(Mono, Mono)), ()),
+                        (Mono, ())
+                    ],
+                    ..Default::default()
+                },
+                fun(Mono, Mono)
+            ),
+            fun(
+                fun(Mono, Mono),
+                fun(fun(Mono, fun(Mono, Mono)), fun(Mono, fun(Mono, Mono)))
+            )
         );
     }
 }
