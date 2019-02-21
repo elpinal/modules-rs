@@ -11,6 +11,7 @@ use std::iter::FromIterator;
 use failure::Fail;
 
 use super::BinOp;
+use super::Purity;
 
 pub mod dynamic;
 
@@ -1168,6 +1169,14 @@ impl Term {
             .rfold(t, |acc, p| Term::poly(Some(p.0.clone()), acc))
     }
 
+    pub fn abs_env_purity<S>(env: &Env<Type, S>, p: Purity, t: Term) -> Self {
+        if p.is_pure() {
+            Term::abs_env(env, t)
+        } else {
+            t
+        }
+    }
+
     pub fn app_env<S>(t: Term, env: &Env<Type, S>) -> Self {
         let t = (0..env.tenv.len()).rfold(t, |acc, n| Term::inst(acc, Some(Type::var(n))));
         env.venv.iter().rev().enumerate().rfold(t, |acc, (i, ty)| {
@@ -1177,6 +1186,14 @@ impl Term {
                 acc
             }
         })
+    }
+
+    pub fn app_env_purity<S>(t: Term, env: &Env<Type, S>, p: Purity) -> Self {
+        if p.is_pure() {
+            Term::app_env(t, env)
+        } else {
+            t
+        }
     }
 
     /// Creates a successive projection.

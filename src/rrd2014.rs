@@ -1694,6 +1694,14 @@ impl Purity {
     pub fn join(self, p: Purity) -> Self {
         self.max(p)
     }
+
+    fn is_pure(self) -> bool {
+        self == Purity::Pure
+    }
+
+    fn is_impure(self) -> bool {
+        self == Purity::Impure
+    }
 }
 
 #[cfg(test)]
