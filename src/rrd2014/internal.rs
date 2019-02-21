@@ -753,6 +753,16 @@ impl Type {
         Type::Record(Record::from_iter(iter))
     }
 
+    pub fn abs_env<T, S>(env: &Env<T, S>, ty: Type) -> Self {
+        env.tenv
+            .iter()
+            .rfold(ty, |acc, p| Type::abs(Some(p.0.clone()), acc))
+    }
+
+    pub fn app_env<T, S>(ty: Type, env: &Env<T, S>) -> Self {
+        (0..env.tenv.len()).rfold(ty, |acc, n| Type::app(acc, Type::var(n)))
+    }
+
     pub fn must_be_int(&self) -> Result<(), TypeError> {
         if let Type::Int = *self {
             Ok(())
@@ -2422,6 +2432,84 @@ mod tests {
                 fun(Mono, Mono),
                 fun(fun(Mono, fun(Mono, Mono)), fun(Mono, fun(Mono, Mono)))
             )
+        );
+    }
+
+    #[test]
+    fn type_abs_app_env() {
+        use Kind::*;
+        use Type::*;
+
+        let fun = Kind::fun;
+        let abs = Type::abs;
+        let app = Type::app;
+        let var = Type::var;
+
+        assert_eq!(Type::abs_env::<Type, ()>(&Env::default(), Int), Int);
+
+        assert_eq!(
+            Type::abs_env::<Type, _>(
+                &Env {
+                    tenv: vec![(Mono, ())],
+                    ..Default::default()
+                },
+                Int
+            ),
+            abs(vec![Mono], Int)
+        );
+
+        // Capture can occur.
+        assert_eq!(
+            Type::abs_env::<Type, _>(
+                &Env {
+                    tenv: vec![(fun(Mono, Mono), ()), (Mono, ())],
+                    ..Default::default()
+                },
+                var(0)
+            ),
+            abs(vec![Mono, fun(Mono, Mono)], var(0))
+        );
+
+        assert_eq!(
+            Type::abs_env::<Type, _>(
+                &Env {
+                    tenv: vec![
+                        (fun(Mono, Mono), ()),
+                        (fun(Mono, fun(Mono, Mono)), ()),
+                        (Mono, ())
+                    ],
+                    ..Default::default()
+                },
+                var(0)
+            ),
+            abs(
+                vec![Mono, fun(Mono, fun(Mono, Mono)), fun(Mono, Mono)],
+                var(0)
+            )
+        );
+
+        assert_eq!(Type::app_env::<Type, ()>(Int, &Env::default()), Int);
+
+        assert_eq!(
+            Type::app_env::<Type, ()>(
+                Int,
+                &Env {
+                    tenv: vec![(Mono, ())],
+                    ..Default::default()
+                },
+            ),
+            app(Int, var(0))
+        );
+
+        assert_eq!(
+            Type::app_env::<Type, ()>(
+                Int,
+                &Env {
+                    tenv: vec![(Mono, ()), (Mono, ())],
+                    ..Default::default()
+                },
+            ),
+            app(app(Int, var(1)), var(0))
         );
     }
 }
