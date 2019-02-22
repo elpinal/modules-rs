@@ -1791,6 +1791,22 @@ impl<T, S> Env<T, S> {
         }
     }
 
+    fn insert_dummy_value_at(&mut self, v: Variable) {
+        let n = self.venv.len() - v.get_index() - 1;
+        self.venv.insert(n, None);
+        self.nmap.values_mut().for_each(|i| {
+            if *i >= n {
+                *i += 1;
+            }
+        })
+    }
+
+    pub fn insert_dummy_values_at(&mut self, v: Variable, n: usize) {
+        for _ in 0..n {
+            self.insert_dummy_value_at(v);
+        }
+    }
+
     pub fn drop_values_state(&mut self, n: usize, state: EnvState) {
         self.venv.truncate(self.venv.len() - n);
         self.nmap = state.0;
