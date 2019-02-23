@@ -112,6 +112,15 @@ pub struct Env<T, S> {
 
 pub struct EnvState(HashMap<Name, usize>);
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct EnvAbs<T, S> {
+    /// A type environment.
+    /// Variable 0 denotes the last introduced type variable.
+    tenv: Vec<(Kind, S)>,
+
+    venv: Vec<Option<T>>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Context<'a> {
     tenv: Vec<Cow<'a, Kind>>,
@@ -1156,10 +1165,12 @@ impl Term {
         Term::BinOp(op, Box::new(t1), Box::new(t2))
     }
 
-    pub fn abs_env<T, S>(env: &Env<T, S>, t: Term) -> Self
+    pub fn abs_env<U, T, S>(env: U, t: Term) -> Self
     where
+        U: Into<EnvAbs<T, S>>,
         T: Clone + Into<Type>,
     {
+        let env = env.into();
         let t = env.venv.iter().rfold(t, |acc, ty| {
             if let Some(ref ty) = *ty {
                 Term::abs(ty.clone().into(), acc)
@@ -1172,10 +1183,12 @@ impl Term {
             .rfold(t, |acc, p| Term::poly(Some(p.0.clone()), acc))
     }
 
-    pub fn abs_env_purity<T, S>(env: &Env<T, S>, p: Purity, t: Term) -> Self
+    pub fn abs_env_purity<U, T, S>(env: U, p: Purity, t: Term) -> Self
     where
+        U: Into<EnvAbs<T, S>>,
         T: Clone + Into<Type>,
     {
+        let env = env.into();
         if p.is_pure() {
             Term::abs_env(env, t)
         } else {
@@ -1183,7 +1196,11 @@ impl Term {
         }
     }
 
-    pub fn app_env<T, S>(t: Term, env: &Env<T, S>) -> Self {
+    pub fn app_env<U, T, S>(t: Term, env: U) -> Self
+    where
+        U: Into<EnvAbs<T, S>>,
+    {
+        let env = env.into();
         let t = (0..env.tenv.len()).rfold(t, |acc, n| Term::inst(acc, Some(Type::var(n))));
         env.venv.iter().rev().enumerate().rfold(t, |acc, (i, ty)| {
             if ty.is_some() {
@@ -1194,7 +1211,10 @@ impl Term {
         })
     }
 
-    pub fn app_env_purity<T, S>(t: Term, env: &Env<T, S>, p: Purity) -> Self {
+    pub fn app_env_purity<U, T, S>(t: Term, env: U, p: Purity) -> Self
+    where
+        U: Into<EnvAbs<T, S>>,
+    {
         if p.is_pure() {
             Term::app_env(t, env)
         } else {
@@ -1866,6 +1886,24 @@ impl<T, S> Env<T, S> {
         let n = self.n;
         self.n += 1;
         Variable::Generated(n)
+    }
+}
+
+impl<'a, T: Clone, S: Clone> From<&'a Env<T, S>> for EnvAbs<T, S> {
+    fn from(env: &'a Env<T, S>) -> EnvAbs<T, S> {
+        EnvAbs {
+            tenv: env.tenv.clone(),
+            venv: env.venv.clone(),
+        }
+    }
+}
+
+impl<'a, T: Clone, S: Clone> From<&'a mut Env<T, S>> for EnvAbs<T, S> {
+    fn from(env: &'a mut Env<T, S>) -> EnvAbs<T, S> {
+        EnvAbs {
+            tenv: env.tenv.clone(),
+            venv: env.venv.clone(),
+        }
     }
 }
 

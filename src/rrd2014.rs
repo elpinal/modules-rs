@@ -16,6 +16,7 @@ use std::iter::FromIterator;
 
 use failure::Fail;
 
+use internal::EnvAbs;
 use internal::EnvError;
 use internal::Fgtv;
 use internal::Kind as IKind;
@@ -474,8 +475,8 @@ trait Normalize {
     fn normalize(self) -> Self;
 }
 
-trait Lift {
-    fn lifted_by(self, another: &Self) -> Self;
+trait Lift<RHS = Self> {
+    fn lifted_by(self, another: &RHS) -> Self;
 }
 
 #[derive(Debug, Fail, PartialEq)]
@@ -564,6 +565,14 @@ impl Lift for Vec<(IKind, StemFrom)> {
                     sf,
                 )
             })
+            .collect()
+    }
+}
+
+impl Lift<Env> for Vec<(IKind, StemFrom)> {
+    fn lifted_by(self, another: &Env) -> Self {
+        self.into_iter()
+            .map(|(k, sf)| (IKind::fun_env(another, k), sf))
             .collect()
     }
 }
@@ -771,11 +780,17 @@ impl Elaboration for Sig {
 }
 
 impl Elaboration for Binding {
-    type Output = (ITerm, Existential<HashMap<Label, SemanticSig>>, Subst);
+    type Output = (
+        ITerm,
+        Existential<HashMap<Label, SemanticSig>>,
+        Subst,
+        Purity,
+    );
     type Error = TypeError;
 
     fn elaborate(&self, env: &mut Env) -> Result<Self::Output, Self::Error> {
         use Binding::*;
+        use Purity::*;
         use SemanticSig::*;
         match *self {
             Val(ref id, ref e) => {
@@ -785,12 +800,16 @@ impl Elaboration for Binding {
                 t.shift(isize::try_from(ks.len()).unwrap());
                 t.apply(&s1);
                 Ok((
-                    ITerm::record(vec![(Label::from(id.clone()), ITerm::poly(ks, t))]),
+                    ITerm::abs_env(
+                        env,
+                        ITerm::record(vec![(Label::from(id), ITerm::poly(ks, t))]),
+                    ),
                     Existential::from(HashMap::from_iter(vec![(
-                        Label::from(id.clone()),
+                        Label::from(id),
                         AtomicTerm(scheme),
                     )])),
                     s,
+                    Pure,
                 ))
             }
             Type(ref id, ref ty) => {
@@ -798,26 +817,37 @@ impl Elaboration for Binding {
                     .elaborate(env)
                     .map_err(|e| TypeError::TypeBinding(id.clone(), Box::new(e)))?;
                 Ok((
-                    ITerm::record(vec![(
-                        Label::from(id.clone()),
-                        SemanticTerm::Type(ty.clone(), k.clone()).into(),
-                    )]),
+                    ITerm::abs_env(
+                        env,
+                        ITerm::record(vec![(
+                            Label::from(id.clone()),
+                            SemanticTerm::Type(ty.clone(), k.clone()).into(),
+                        )]),
+                    ),
                     Existential::from(HashMap::from_iter(vec![(
                         Label::from(id.clone()),
                         AtomicType(ty, k),
                     )])),
                     s,
+                    Pure,
                 ))
             }
             Module(ref id, ref m) => {
-                let (t, asig, s) = m.elaborate(env)?;
+                let (t, asig, s, p) = m.elaborate(env)?;
                 asig.0.body.atomic()?;
                 Ok((
                     ITerm::unpack(
                         t,
                         asig.0.qs.len(),
                         ITerm::pack(
-                            ITerm::record(vec![(Label::from(id.clone()), ITerm::var(0))]),
+                            ITerm::abs_env_purity(
+                                &*env,
+                                p,
+                                ITerm::record(vec![(
+                                    Label::from(id),
+                                    ITerm::app_env_purity(ITerm::var(0), &*env, p),
+                                )]),
+                            ),
                             (0..asig.0.qs.len()).map(IType::var).collect(),
                             asig.0.qs.iter().map(|p| p.0.clone()),
                             StructureSig(HashMap::from_iter(Some((
@@ -829,86 +859,166 @@ impl Elaboration for Binding {
                     ),
                     asig.map(|ssig| HashMap::from_iter(vec![(Label::from(id.clone()), ssig)])),
                     s,
+                    p,
                 ))
             }
             Signature(ref id, ref sig) => {
                 let (asig, s) = sig.elaborate(env)?;
                 Ok((
-                    ITerm::record(Some((
-                        Label::from(id),
-                        SemanticTerm::Sig(asig.clone()).into(),
-                    ))),
+                    ITerm::abs_env(
+                        env,
+                        ITerm::record(Some((
+                            Label::from(id),
+                            SemanticTerm::Sig(asig.clone()).into(),
+                        ))),
+                    ),
                     Existential::from(HashMap::from_iter(Some((
                         Label::from(id),
                         SemanticSig::AtomicSig(Box::new(asig)),
                     )))),
                     s,
+                    Pure,
                 ))
             }
             Include(ref m) => {
-                let (t, asig, s) = m.elaborate(env)?;
+                let (t, asig, s, p) = m.elaborate(env)?;
                 let ex = asig.try_map::<_, _, TypeError, _>(|ssig| ssig.get_structure())?;
-                Ok((t, ex, s))
+                Ok((t, ex, s, p))
             }
         }
     }
 }
 
 impl Elaboration for Module {
-    type Output = (ITerm, AbstractSig, Subst);
+    type Output = (ITerm, AbstractSig, Subst, Purity);
     type Error = TypeError;
 
     #[allow(clippy::many_single_char_names)]
     fn elaborate(&self, env: &mut Env) -> Result<Self::Output, Self::Error> {
         use Module::*;
+        use Purity::*;
         match *self {
             Ident(ref id) => {
                 let (ssig, v) = env.lookup_value_by_name(id.into())?;
-                Ok((ITerm::Var(v), Existential::from(ssig), Subst::default()))
+                Ok((
+                    ITerm::abs_env(env, ITerm::Var(v)),
+                    Existential::from(ssig),
+                    Subst::default(),
+                    Pure,
+                ))
             }
             Seq(ref bs) => {
+                use internal::Variable::Variable as V;
                 let mut v = Vec::new();
                 let mut ls = HashMap::new();
                 let mut qs = Vec::new();
                 let mut body = HashMap::new();
                 let mut ret_subst = Subst::default();
                 let mut n = 0;
+                let mut z = 0;
+                let mut d = 0;
+                let mut memory: Vec<(EnvAbs<_, _>, Purity, Vec<Label>, usize)> = Vec::new();
                 let enter_state = env.get_state();
-                for b in bs {
-                    let (t, ex, s) = b.elaborate(env)?;
+                for (i, b) in bs.iter().enumerate() {
+                    let (t, ex, s, p) = b.elaborate(env)?;
+                    memory.push((
+                        EnvAbs::from(&*env),
+                        p,
+                        ex.0.body.keys().cloned().collect(),
+                        z,
+                    ));
                     let len = ex.0.qs.len();
+                    let z0 = z;
+                    z += if len == 0 { 1 } else { len };
                     n += if len == 0 { 1 } else { len };
                     let n0 = n;
                     ret_subst = ret_subst.compose(s.clone());
                     body.apply(&s);
                     v.apply(&s);
                     env.insert_types(ex.0.qs.clone().into_iter().map(|(k, s)| (k, Some(s))));
-                    env.insert_dummy_values(if len == 0 { 1 } else { len });
+                    env.insert_dummy_values_at(V(d), if len == 0 { 1 } else { len });
                     qs.extend(ex.0.qs.clone());
                     body.shift(isize::try_from(len).unwrap());
                     body.extend(ex.0.body.clone());
                     let mut w = Vec::new();
                     for (i, (l, ssig)) in ex.0.body.into_iter().enumerate() {
                         ls.insert(l.clone(), n0);
+                        // `w` might be unneeded.
                         w.push(ITerm::proj(ITerm::var(i), Some(l.clone())));
                         n += 1;
+                        d += 1;
                         env.insert_value(Name::try_from(l).unwrap(), ssig);
                     }
+                    let t = ITerm::let_in(
+                        (0..i).flat_map(|j| {
+                            let (ref ea, p0, ref ls, i0) = memory[j];
+                            ls.iter().enumerate().map(move |(k, l)| {
+                                ITerm::abs_env_purity(
+                                    ea.clone(),
+                                    p.join(p0),
+                                    ITerm::proj(
+                                        ITerm::app_env_purity(
+                                            ITerm::var(z0 - i0 + j + k),
+                                            ea.clone(),
+                                            p0,
+                                        ),
+                                        Some(l.clone()),
+                                    ),
+                                )
+                            })
+                        }),
+                        t,
+                    );
                     v.push(BindingInformation { t, n: len, w });
                 }
                 env.drop_values_state(n, enter_state);
                 env.drop_types(qs.len());
-                let m = ls
-                    .into_iter()
-                    .flat_map(|(l, i)| Some((l.clone(), ITerm::proj(ITerm::var(n - i), Some(l)))));
+                let mut n0 = 0;
+                let m: HashMap<Label, ITerm> = memory
+                    .iter()
+                    .rev()
+                    .map(|x| -> HashMap<Label, ITerm> {
+                        x.2.iter()
+                            .rev()
+                            .map(|l| -> (Label, ITerm) {
+                                let p = (l.clone(), ITerm::var(n0));
+                                n0 += 1;
+                                p
+                            })
+                            .collect()
+                    })
+                    .rev()
+                    .flatten()
+                    .collect();
+                let p_all = memory.iter().fold(Pure, |acc, entry| acc.join(entry.1));
                 let t = v.into_iter().rfold(
                     ITerm::pack(
-                        ITerm::record(m),
+                        ITerm::abs_env_purity(
+                            env,
+                            p_all,
+                            ITerm::let_in(
+                                memory.iter().enumerate().flat_map(
+                                    |(j, &(ref ea, p0, ref ls, i0))| {
+                                        ls.iter().enumerate().map(move |(k, l)| {
+                                            ITerm::proj(
+                                                ITerm::app_env_purity(
+                                                    ITerm::var(z - i0 + j + k),
+                                                    ea.clone(),
+                                                    p0,
+                                                ),
+                                                Some(l.clone()),
+                                            )
+                                        })
+                                    },
+                                ),
+                                ITerm::record(m),
+                            ),
+                        ),
                         (0..qs.len()).map(IType::var).collect(),
                         qs.iter().map(|p| p.0.clone()),
                         SemanticSig::StructureSig(body.clone()).into(),
                     ),
-                    |t0, BindingInformation { t, n, w }| ITerm::unpack(t, n, ITerm::let_in(w, t0)),
+                    |t0, BindingInformation { t, n, .. }| ITerm::unpack(t, n, t0),
                 );
                 Ok((
                     t,
@@ -917,11 +1027,12 @@ impl Elaboration for Module {
                         body: SemanticSig::StructureSig(body),
                     }),
                     ret_subst,
+                    p_all,
                 ))
             }
             Proj(ref m, ref id) => {
                 // TODO: there may be room for performance improvement.
-                let (t, asig, s) = m.elaborate(env)?;
+                let (t, asig, s, p) = m.elaborate(env)?;
                 let asig0 = asig.clone().try_map::<_, _, TypeError, _>(|ssig| {
                     let mut m = ssig.get_structure()?;
                     m.remove(&id.into())
@@ -932,7 +1043,14 @@ impl Elaboration for Module {
                         t,
                         asig.0.qs.len(),
                         ITerm::pack(
-                            ITerm::proj(ITerm::var(0), Some(id.into())),
+                            ITerm::abs_env_purity(
+                                &*env,
+                                p,
+                                ITerm::proj(
+                                    ITerm::app_env_purity(ITerm::var(0), &*env, p),
+                                    Some(id.into()),
+                                ),
+                            ),
                             (0..asig.0.qs.len()).map(IType::var).collect(),
                             asig.0.qs.iter().map(|p| p.0.clone()),
                             asig0.0.body.clone().into(),
@@ -940,21 +1058,35 @@ impl Elaboration for Module {
                     ),
                     asig0,
                     s,
+                    p,
                 ))
             }
             Seal(ref id, ref sig) => {
                 let (ssig, v) = env.lookup_value_by_name(id.into())?;
                 let (asig, s) = sig.elaborate(env)?;
                 let (t, tys) = ssig.r#match(env, &asig)?;
+                let qs = asig.0.qs.clone().lifted_by(env);
+                let mut body = asig.0.body.clone();
+                {
+                    use internal::Variable::Variable as V;
+                    let s0 = Subst::from_iter(
+                        (0..qs.len()).map(|i| (V(i), IType::app_env(IType::var(i), env))),
+                    );
+                    body.apply(&s0);
+                }
                 Ok((
+                    //TODO: the 4th argument to `ITerm::pack` should perhaps be changed.
                     ITerm::pack(
-                        ITerm::app(t, ITerm::Var(v)),
-                        tys,
+                        ITerm::abs_env(&*env, ITerm::app(t, ITerm::Var(v))),
+                        tys.into_iter()
+                            .map(|ty| IType::abs_env(&*env, ty))
+                            .collect(),
                         asig.0.qs.iter().map(|p| p.0.clone()),
                         asig.0.body.clone().into(),
                     ),
-                    asig,
+                    Existential(Quantified { qs, body }),
                     s,
+                    Pure,
                 ))
             }
             Fun(ref id, ref sig, ref m) => {
@@ -962,25 +1094,34 @@ impl Elaboration for Module {
                 let enter_state = env.get_state();
                 env.insert_types(asig1.0.qs.clone().into_iter().map(|(k, s)| (k, Some(s))));
                 env.insert_value(Name::from(id.clone()), asig1.0.body.clone());
-                let (t, asig2, s2) = m.elaborate(env)?;
+                let (t, asig2, s2, p) = m.elaborate(env)?;
                 // TODO: apply `s2` to `asig1`?
                 env.drop_values_state(1, enter_state);
                 env.drop_types(asig1.0.qs.len());
+                if p.is_pure() {
+                    unimplemented!();
+                }
                 Ok((
-                    ITerm::poly(
-                        asig1.0.qs.iter().map(|p| p.0.clone()),
-                        ITerm::abs(asig1.0.body.clone().into(), t),
+                    ITerm::abs_env(
+                        env,
+                        ITerm::poly(
+                            asig1.0.qs.iter().map(|p| p.0.clone()),
+                            ITerm::abs(asig1.0.body.clone().into(), t),
+                        ),
                     ),
                     Existential::from(SemanticSig::FunctorSig(
                         Universal::from(asig1).map(|ssig| Box::new(self::Fun(ssig, asig2))),
                     )),
                     s1.compose(s2),
+                    Pure,
                 ))
             }
             App(ref id1, ref id2) => {
                 let (ssig1, v1) = env.lookup_value_by_name(id1.into())?;
                 let (ssig2, v2) = env.lookup_value_by_name(id2.into())?;
+                // FIXME: Support applicative functors.
                 let u = ssig1.get_functor()?;
+                let p = Impure;
                 let self::Fun(ssig1, mut asig1) = u.0.body;
                 let len = u.0.qs.len();
                 let (t, tys) = ssig2.r#match(
@@ -995,12 +1136,17 @@ impl Elaboration for Module {
                 // TODO: This may be wrong.
                 asig1.apply(&s);
                 Ok((
-                    ITerm::app(
-                        ITerm::inst(ITerm::Var(v1), tys),
-                        ITerm::app(t, ITerm::Var(v2)),
+                    ITerm::abs_env_purity(
+                        env,
+                        p,
+                        ITerm::app(
+                            ITerm::inst(ITerm::Var(v1), tys),
+                            ITerm::app(t, ITerm::Var(v2)),
+                        ),
                     ),
                     asig1,
                     Subst::default(),
+                    p,
                 ))
             }
             Unpack(ref e, ref sig) => {
@@ -1011,7 +1157,7 @@ impl Elaboration for Module {
                 if !ty.equal(&ty1) {
                     Err(TypeError::TypeMismatch(ty, ty1))?;
                 }
-                Ok((t, asig, s1.compose(s2)))
+                Ok((t, asig, s1.compose(s2), Impure))
             }
         }
     }
@@ -1022,7 +1168,7 @@ impl Elaboration for Path {
     type Error = TypeError;
 
     fn elaborate(&self, env: &mut Env) -> Result<Self::Output, Self::Error> {
-        let (t, asig, s) = self.0.elaborate(env)?;
+        let (t, asig, s, p) = self.0.elaborate(env)?;
         // Need shift?
         IType::from(asig.0.body.clone())
             .kind_of(env)
@@ -1030,7 +1176,11 @@ impl Elaboration for Path {
             .mono()
             .map_err(TypeError::NotMono)?;
         Ok((
-            ITerm::unpack(t, asig.0.qs.len(), ITerm::var(0)),
+            ITerm::unpack(
+                t,
+                asig.0.qs.len(),
+                ITerm::app_env_purity(ITerm::var(0), env, p),
+            ),
             asig.0.body,
             s,
         ))
@@ -1402,11 +1552,27 @@ impl Expr {
                 Ok((ITerm::inst(t, tys), ty, s))
             }
             Pack(ref m, ref sig) => {
-                let (t2, asig0, s1) = m.elaborate(env)?;
+                let (t2, asig0, s1, p) = m.elaborate(env)?;
                 let (asig, s2) = sig.elaborate(env)?;
                 let asig = asig.normalize();
                 let t1 = asig0.subtype_of(env, &asig)?;
-                Ok((ITerm::app(t1, t2), asig.into(), s1.compose(s2)))
+                Ok((
+                    ITerm::app(
+                        t1,
+                        ITerm::unpack(
+                            t2,
+                            asig0.0.qs.len(),
+                            ITerm::pack(
+                                ITerm::app_env_purity(ITerm::var(0), env, p),
+                                (0..asig0.0.qs.len()).map(IType::var).collect(),
+                                asig.0.qs.iter().map(|p| p.0.clone()),
+                                asig0.into(),
+                            ),
+                        ),
+                    ),
+                    asig.into(),
+                    s1.compose(s2),
+                ))
             }
             Int(n) => Ok((ITerm::Int(n), IType::Int, Subst::default())),
             Bool(b) => Ok((ITerm::Bool(b), IType::Bool, Subst::default())),
