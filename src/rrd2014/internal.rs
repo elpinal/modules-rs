@@ -227,6 +227,16 @@ impl Shift for Type {
     }
 }
 
+impl Shift for Variable {
+    fn shift_above(&mut self, c: usize, d: isize) {
+        if let V(ref mut n) = *self {
+            if c <= *n {
+                *n = usize::try_from(isize::try_from(*n).unwrap() + d).unwrap();
+            }
+        }
+    }
+}
+
 impl Shift for Kind {
     fn shift_above(&mut self, _: usize, _: isize) {}
 }
@@ -460,6 +470,16 @@ impl Fgtv for Kind {
     }
 }
 
+impl Fgtv for Variable {
+    fn fgtv(&self) -> HashSet<usize> {
+        if let Variable::Generated(n) = *self {
+            HashSet::from_iter(Some(n))
+        } else {
+            HashSet::new()
+        }
+    }
+}
+
 impl Fgtv for Type {
     fn fgtv(&self) -> HashSet<usize> {
         use Type::*;
@@ -518,7 +538,7 @@ impl From<super::SemanticSig> for Type {
     fn from(st: super::SemanticSig) -> Self {
         use super::SemanticSig::*;
         match st {
-            AtomicTerm(ty) => ty,
+            AtomicTerm(_, ty) => ty,
             AtomicType(mut ty, k) => {
                 ty.shift(1);
                 Type::forall(
@@ -1703,6 +1723,10 @@ pub enum UnificationError {
 impl<T, S> Env<T, S> {
     pub fn get_generated_type_env(self) -> Vec<Kind> {
         self.gtenv
+    }
+
+    pub fn tenv_len(&self) -> usize {
+        self.tenv.len()
     }
 
     pub fn lookup_type(&self, v: Variable) -> Result<(Kind, S), EnvError>

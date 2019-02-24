@@ -138,12 +138,18 @@ pub struct Applicative(SemanticSig, SemanticSig);
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum SemanticSig {
-    AtomicTerm(IType),
+    AtomicTerm(SemanticPath, IType),
     AtomicType(IType, IKind),
     AtomicSig(Box<AbstractSig>),
     StructureSig(HashMap<Label, SemanticSig>),
     FunctorSig(Universal<Box<Fun>>),
     Applicative(Universal<Box<Applicative>>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SemanticPath {
+    v: internal::Variable,
+    tys: Vec<IType>,
 }
 
 enum SemanticTerm {
@@ -209,6 +215,9 @@ pub enum TypeError {
 
     #[fail(display = "not abstract type: {:?}", _0)]
     NotAbstractType(IType),
+
+    #[fail(display = "value identity mismatch: {:?} and {:?}", _0, _1)]
+    SemanticPathMismatch(SemanticPath, SemanticPath),
 }
 
 impl From<EnvError> for TypeError {
@@ -226,6 +235,15 @@ impl From<SemanticSigError> for TypeError {
 impl From<!> for TypeError {
     fn from(e: !) -> Self {
         e
+    }
+}
+
+impl From<usize> for SemanticPath {
+    fn from(n: usize) -> Self {
+        SemanticPath {
+            v: internal::Variable::new(n),
+            tys: Vec::new(),
+        }
     }
 }
 
@@ -305,12 +323,22 @@ impl Substitution for Applicative {
     }
 }
 
+impl Substitution for SemanticPath {
+    fn apply(&mut self, s: &Subst) {
+        // TODO: How about `self.v`?
+        self.tys.iter_mut().for_each(|ty| ty.apply(s));
+    }
+}
+
 impl Substitution for SemanticSig {
     fn apply(&mut self, s: &Subst) {
         use SemanticSig::*;
 
         match *self {
-            AtomicTerm(ref mut ty) => ty.apply(s),
+            AtomicTerm(ref mut sp, ref mut ty) => {
+                sp.apply(s);
+                ty.apply(s);
+            }
             AtomicType(ref mut ty, ref mut k) => {
                 k.apply(s);
                 ty.apply(s);
@@ -377,11 +405,21 @@ impl Shift for Applicative {
     }
 }
 
+impl Shift for SemanticPath {
+    fn shift_above(&mut self, c: usize, d: isize) {
+        self.v.shift_above(c, d);
+        self.tys.iter_mut().for_each(|ty| ty.shift_above(c, d));
+    }
+}
+
 impl Shift for SemanticSig {
     fn shift_above(&mut self, c: usize, d: isize) {
         use SemanticSig::*;
         match *self {
-            AtomicTerm(ref mut ty) => ty.shift_above(c, d),
+            AtomicTerm(ref mut sp, ref mut ty) => {
+                sp.shift_above(c, d);
+                ty.shift_above(c, d);
+            }
             AtomicType(ref mut ty, ref mut k) => {
                 ty.shift_above(c, d);
                 k.shift_above(c, d);
@@ -434,11 +472,23 @@ impl Fgtv for Applicative {
     }
 }
 
+impl Fgtv for SemanticPath {
+    fn fgtv(&self) -> HashSet<usize> {
+        let mut s = self.v.fgtv();
+        s.extend(self.tys.iter().flat_map(|ty| ty.fgtv()));
+        s
+    }
+}
+
 impl Fgtv for SemanticSig {
     fn fgtv(&self) -> HashSet<usize> {
         use SemanticSig::*;
         match *self {
-            AtomicTerm(ref ty) => ty.fgtv(),
+            AtomicTerm(ref sp, ref ty) => {
+                let mut s = sp.fgtv();
+                s.extend(ty.fgtv());
+                s
+            }
             AtomicType(ref ty, ref k) => {
                 let mut s = ty.fgtv();
                 s.extend(k.fgtv());
@@ -522,9 +572,9 @@ impl SemanticSig {
         }
     }
 
-    fn get_atomic_term(self) -> Result<IType, SemanticSigError> {
+    fn get_atomic_term(self) -> Result<(SemanticPath, IType), SemanticSigError> {
         match self {
-            SemanticSig::AtomicTerm(ty) => Ok(ty),
+            SemanticSig::AtomicTerm(sp, ty) => Ok((sp, ty)),
             _ => Err(SemanticSigError::AtomicTerm(self)),
         }
     }
@@ -687,7 +737,16 @@ impl Elaboration for Decl {
             Val(ref id, ref ty) => {
                 let (ty, k, s) = ty.elaborate(env)?;
                 k.mono().map_err(TypeError::NotMono)?;
-                Ok((f(id, AtomicTerm(ty)), s))
+                Ok((
+                    Existential(Quantified {
+                        qs: vec![(IKind::Mono, id.into())],
+                        body: HashMap::from_iter(Some((
+                            id.into(),
+                            AtomicTerm(SemanticPath::from(0), ty),
+                        ))),
+                    }),
+                    s,
+                ))
             }
             ManType(ref id, ref ty) => {
                 let (ty, k, s) = ty.elaborate(env)?;
@@ -839,22 +898,125 @@ impl Elaboration for Binding {
         use SemanticSig::*;
         match *self {
             Val(ref id, ref e) => {
+                // TODO: Which generalization strategy should be taken?
+                match *e {
+                    Expr::Path(ref p) => {
+                        let (t, asig, s, p) = p.0.elaborate(env)?;
+                        let (sp, ty) = asig.0.body.get_atomic_term()?;
+                        return Ok((
+                            ITerm::unpack(
+                                t,
+                                asig.0.qs.len(),
+                                ITerm::pack(
+                                    ITerm::abs_env_purity(
+                                        &*env,
+                                        p,
+                                        ITerm::record(Some((
+                                            id.into(),
+                                            ITerm::var(env.tenv_len()),
+                                        ))),
+                                    ),
+                                    (0..asig.0.qs.len()).map(IType::var).collect(),
+                                    asig.0.qs.iter().map(|p| p.0.clone()),
+                                    // wrong?
+                                    Existential(Quantified {
+                                        qs: asig.0.qs.clone(),
+                                        body: IType::record(Some((
+                                            id.into(),
+                                            AtomicTerm(sp.clone(), ty.clone()).into(),
+                                        ))),
+                                    })
+                                    .into(),
+                                ),
+                            ),
+                            Existential(Quantified {
+                                qs: asig.0.qs,
+                                body: HashMap::from_iter(Some((id.into(), AtomicTerm(sp, ty)))),
+                            }),
+                            s,
+                            p,
+                        ));
+                    }
+                    _ if e.is_pure() => {
+                        let (t, ty, s) = e.elaborate(env)?;
+                        return Ok((
+                            ITerm::pack(
+                                ITerm::abs_env(
+                                    &*env,
+                                    ITerm::record(Some((
+                                        id.into(),
+                                        ITerm::from(SemanticTerm::Term(t)),
+                                    ))),
+                                ),
+                                vec![IType::abs_env(&*env, IType::record(None))],
+                                Some(IKind::fun_env(&*env, IKind::Mono)),
+                                IType::record(Some((
+                                    id.into(),
+                                    IType::from(AtomicTerm(
+                                        SemanticPath {
+                                            v: internal::Variable::new(0),
+                                            tys: (0..env.tenv_len())
+                                                .rev()
+                                                .map(IType::var)
+                                                .collect(),
+                                        },
+                                        ty.clone(),
+                                    )),
+                                ))),
+                            ),
+                            Existential(Quantified {
+                                qs: vec![(IKind::fun_env(env, IKind::Mono), id.into())],
+                                body: HashMap::from_iter(Some((
+                                    id.into(),
+                                    AtomicTerm(
+                                        SemanticPath {
+                                            v: internal::Variable::new(0),
+                                            tys: (0..env.tenv_len())
+                                                .rev()
+                                                .map(IType::var)
+                                                .collect(),
+                                        },
+                                        ty,
+                                    ),
+                                ))),
+                            }),
+                            s,
+                            Pure,
+                        ));
+                    }
+                    _ => (),
+                }
                 let (t, ty, s) = e.elaborate(env)?;
                 let (scheme, s1, ks) = ty.close(env);
                 let mut t = ITerm::from(SemanticTerm::Term(t));
                 t.shift(isize::try_from(ks.len()).unwrap());
                 t.apply(&s1);
                 Ok((
-                    ITerm::abs_env(
-                        env,
-                        ITerm::record(vec![(Label::from(id), ITerm::poly(ks, t))]),
+                    // ITerm::abs_env(
+                    //     env,
+                    //     ITerm::record(vec![(Label::from(id), ITerm::poly(ks, t))]),
+                    // ),
+                    ITerm::pack(
+                        ITerm::record(Some((
+                            id.into(),
+                            ITerm::poly(ks, ITerm::from(SemanticTerm::Term(t))),
+                        ))),
+                        vec![IType::record(None)],
+                        Some(IKind::Mono),
+                        IType::record(Some((
+                            id.into(),
+                            IType::from(AtomicTerm(SemanticPath::from(0), scheme.clone())),
+                        ))),
                     ),
-                    Existential::from(HashMap::from_iter(vec![(
-                        Label::from(id),
-                        AtomicTerm(scheme),
-                    )])),
+                    Existential(Quantified {
+                        qs: vec![(IKind::Mono, id.into())],
+                        body: HashMap::from_iter(Some((
+                            id.into(),
+                            AtomicTerm(SemanticPath::from(0), scheme),
+                        ))),
+                    }),
                     s,
-                    Pure,
+                    Impure,
                 ))
             }
             Type(ref id, ref ty) => {
@@ -1268,10 +1430,13 @@ impl Subtype for SemanticSig {
     fn subtype_of(&self, env: &mut Env, another: &Self) -> Result<ITerm, Self::Error> {
         use SemanticSig::*;
         match (self, another) {
-            (&AtomicTerm(ref ty1), &AtomicTerm(ref ty2)) => {
+            (&AtomicTerm(ref sp1, ref ty1), &AtomicTerm(ref sp2, ref ty2)) => {
+                if !sp1.equal(sp2) {
+                    return Err(TypeError::SemanticPathMismatch(sp1.clone(), sp2.clone()));
+                }
                 let t = ty1.subtype_of(env, ty2)?;
                 Ok(ITerm::abs(
-                    IType::from(AtomicTerm(ty1.clone())),
+                    IType::from(AtomicTerm(sp1.clone(), ty1.clone())),
                     ITerm::from(SemanticTerm::Term(ITerm::app(t, ITerm::var(0)))),
                 ))
             }
@@ -1403,11 +1568,18 @@ impl Normalize for IType {
     }
 }
 
+impl Normalize for SemanticPath {
+    fn normalize(self) -> Self {
+        // TODO: What is the correct definition?
+        self
+    }
+}
+
 impl Normalize for SemanticSig {
     fn normalize(self) -> Self {
         use SemanticSig::*;
         match self {
-            AtomicTerm(ty) => AtomicTerm(ty.normalize()),
+            AtomicTerm(sp, ty) => AtomicTerm(sp.normalize(), ty.normalize()),
             AtomicType(..) => self,
             AtomicSig(asig) => AtomicSig(Box::new(asig.normalize())),
             StructureSig(m) => StructureSig(
@@ -1566,12 +1738,12 @@ impl Expr {
                 let mut ty0 = IType::Var(v);
                 let name = Name::from(id.clone());
                 let enter_state = env.get_state();
-                env.insert_value(name.clone(), SemanticSig::AtomicTerm(ty0.clone()));
+                env.insert_value(name.clone(), SemanticSig::default_atomic_term(ty0.clone()));
                 let (t, ty, s) = e.infer(env)?;
                 env.drop_values_state(1, enter_state);
                 ty0.apply(&s);
                 Ok((
-                    ITerm::abs(SemanticSig::AtomicTerm(ty0.clone()).into(), t),
+                    ITerm::abs(SemanticSig::default_atomic_term(ty0.clone()).into(), t),
                     IType::fun(ty0, ty),
                     s,
                 ))
@@ -1591,10 +1763,24 @@ impl Expr {
                 Ok((ITerm::app(t1, t2), v, s))
             }
             Path(ref p) => {
-                let (t, ssig, s) = p.elaborate(env)?;
-                let ty = ssig.get_atomic_term()?;
+                let (t, asig, s, p) = p.0.elaborate(env)?;
+                let qs = asig.0.qs;
+                let (_, ty) = asig.0.body.get_atomic_term()?;
+                // Need shift?
+                ty.kind_of(env)
+                    .map_err(TypeError::KindError)?
+                    .mono()
+                    .map_err(TypeError::NotMono)?;
                 let (ty, tys) = ty.new_instance(env);
-                Ok((ITerm::inst(t, tys), ty, s))
+                Ok((
+                    ITerm::unpack(
+                        t,
+                        qs.len(),
+                        ITerm::inst(ITerm::app_env_purity(ITerm::var(0), env, p), tys),
+                    ),
+                    ty,
+                    s,
+                ))
             }
             Pack(ref m, ref sig) => {
                 let (t2, asig0, s1, p) = m.elaborate(env)?;
@@ -1700,8 +1886,10 @@ impl SemanticSig {
         SemanticSig::AtomicSig(Box::new(Existential(Quantified { qs, body })))
     }
 
+    // TODO: remove this function.
     fn default_atomic_term(ty: IType) -> Self {
-        SemanticSig::AtomicTerm(ty)
+        // An arbitrary value.
+        SemanticSig::AtomicTerm(SemanticPath::from(100_000), ty)
     }
 
     fn lookup_instantiation(&self, ssig: &SemanticSig, v: internal::Variable) -> Option<IType> {
@@ -1916,6 +2104,18 @@ impl Purity {
 
     fn is_impure(self) -> bool {
         self == Purity::Impure
+    }
+}
+
+impl SemanticPath {
+    pub fn equal(&self, sp: &SemanticPath) -> bool {
+        self.v == sp.v
+            && self.tys.len() == sp.tys.len()
+            && self
+                .tys
+                .iter()
+                .zip(sp.tys.iter())
+                .all(|(ty1, ty2)| ty1.equal(ty2))
     }
 }
 
