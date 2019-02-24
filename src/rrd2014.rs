@@ -1140,15 +1140,15 @@ impl Elaboration for Module {
                 let enter_state = env.get_state();
                 for (i, b) in bs.iter().enumerate() {
                     let (t, ex, s, p) = b.elaborate(env)?;
+                    let len = ex.0.qs.len();
+                    let z0 = z;
+                    z += if len == 0 { 1 } else { len };
                     memory.push((
                         EnvAbs::from(&*env),
                         p,
                         ex.0.body.keys().cloned().collect(),
                         z,
                     ));
-                    let len = ex.0.qs.len();
-                    let z0 = z;
-                    z += if len == 0 { 1 } else { len };
                     n += if len == 0 { 1 } else { len };
                     let n0 = n;
                     ret_subst = ret_subst.compose(s.clone());
