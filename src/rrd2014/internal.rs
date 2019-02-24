@@ -793,10 +793,13 @@ impl Type {
         (0..env.tenv.len()).rfold(ty, |acc, n| Type::app(acc, Type::var(n)))
     }
 
-    pub fn forall_env<S>(env: &Env<Type, S>, ty: Type) -> Self {
+    pub fn forall_env<T, S>(env: &Env<T, S>, ty: Type) -> Self
+    where
+        T: Clone + Into<Type>,
+    {
         let ty = env.venv.iter().rfold(ty, |acc, ty| {
             if let Some(ref ty) = *ty {
-                Type::fun(ty.clone(), acc)
+                Type::fun(ty.clone().into(), acc)
             } else {
                 acc
             }
@@ -804,6 +807,17 @@ impl Type {
         env.tenv
             .iter()
             .rfold(ty, |acc, p| Type::forall(Some(p.0.clone()), acc))
+    }
+
+    pub fn forall_env_purity<T, S>(env: &Env<T, S>, p: Purity, ty: Type) -> Self
+    where
+        T: Clone + Into<Type>,
+    {
+        if p.is_pure() {
+            Type::forall_env(env, ty)
+        } else {
+            ty
+        }
     }
 
     pub fn must_be_int(&self) -> Result<(), TypeError> {

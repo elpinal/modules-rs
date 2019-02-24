@@ -930,15 +930,14 @@ impl Elaboration for Binding {
                                     ),
                                     (0..asig.0.qs.len()).map(IType::var).collect(),
                                     asig.0.qs.iter().map(|p| p.0.clone()),
-                                    // wrong?
-                                    Existential(Quantified {
-                                        qs: asig.0.qs.clone(),
-                                        body: IType::record(Some((
+                                    IType::forall_env_purity(
+                                        env,
+                                        p,
+                                        IType::record(Some((
                                             id.into(),
                                             AtomicTerm(sp.clone(), ty.clone()).into(),
                                         ))),
-                                    })
-                                    .into(),
+                                    ),
                                 ),
                             ),
                             Existential(Quantified {
@@ -962,19 +961,22 @@ impl Elaboration for Binding {
                                 ),
                                 vec![IType::abs_env(&*env, IType::record(None))],
                                 Some(IKind::fun_env(&*env, IKind::Mono)),
-                                IType::record(Some((
-                                    id.into(),
-                                    IType::from(AtomicTerm(
-                                        SemanticPath {
-                                            v: internal::Variable::new(0),
-                                            tys: (0..env.tenv_len())
-                                                .rev()
-                                                .map(IType::var)
-                                                .collect(),
-                                        },
-                                        ty.clone(),
-                                    )),
-                                ))),
+                                IType::forall_env(
+                                    env,
+                                    IType::record(Some((
+                                        id.into(),
+                                        IType::from(AtomicTerm(
+                                            SemanticPath {
+                                                v: internal::Variable::new(0),
+                                                tys: (0..env.tenv_len())
+                                                    .rev()
+                                                    .map(|n| IType::var(n + 1))
+                                                    .collect(),
+                                            },
+                                            ty.clone(),
+                                        )),
+                                    ))),
+                                ),
                             ),
                             Existential(Quantified {
                                 qs: vec![(IKind::fun_env(env, IKind::Mono), id.into())],
@@ -985,7 +987,7 @@ impl Elaboration for Binding {
                                             v: internal::Variable::new(0),
                                             tys: (0..env.tenv_len())
                                                 .rev()
-                                                .map(IType::var)
+                                                .map(|n| IType::var(n + 1))
                                                 .collect(),
                                         },
                                         ty,
