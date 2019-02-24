@@ -1655,6 +1655,10 @@ impl SemanticSig {
         SemanticSig::AtomicSig(Box::new(Existential(Quantified { qs, body })))
     }
 
+    fn default_atomic_term(ty: IType) -> Self {
+        SemanticSig::AtomicTerm(ty)
+    }
+
     fn lookup_instantiation(&self, ssig: &SemanticSig, v: internal::Variable) -> Option<IType> {
         use SemanticSig::*;
         match (self, ssig) {
@@ -1878,7 +1882,6 @@ mod tests {
     fn env_insert() {
         use internal::Kind::*;
         use internal::*;
-        use SemanticSig::*;
 
         let mut env: Env<SemanticSig, _> = Env::default();
 
@@ -1889,10 +1892,13 @@ mod tests {
         );
         assert_eq!(env.lookup_type(Variable::new(1)), Ok((Mono, "s")));
 
-        env.insert_value(Name::new("x".to_string()), AtomicTerm(Type::Int));
+        env.insert_value(
+            Name::new("x".to_string()),
+            SemanticSig::default_atomic_term(Type::Int),
+        );
         assert_eq!(
             env.lookup_value(Variable::new(0)),
-            Ok(AtomicTerm(Type::Int))
+            Ok(SemanticSig::default_atomic_term(Type::Int))
         );
     }
 
@@ -2002,7 +2008,7 @@ mod tests {
                 ITerm::record(vec![(Label::from("x"), ITerm::Int(23))]),
                 Existential::from(HashMap::from_iter(vec![(
                     Label::from("x"),
-                    AtomicTerm(IType::Int)
+                    SemanticSig::default_atomic_term(IType::Int)
                 )]))
             )
         );
@@ -2016,7 +2022,7 @@ mod tests {
                 )]),
                 Existential::from(HashMap::from_iter(vec![(
                     Label::from("x"),
-                    AtomicTerm(IType::forall(
+                    SemanticSig::default_atomic_term(IType::forall(
                         vec![Mono],
                         IType::fun(IType::var(0), IType::Int)
                     ))
@@ -2270,10 +2276,10 @@ mod tests {
             .ok()
             .map(|p| p.1),
             Some(Existential::from(SemanticSig::structure_sig(vec![
-                (l("y"), SemanticSig::AtomicTerm(IType::Int)),
+                (l("y"), SemanticSig::default_atomic_term(IType::Int)),
                 (
                     l("f"),
-                    SemanticSig::AtomicTerm(IType::forall(
+                    SemanticSig::default_atomic_term(IType::forall(
                         vec![IKind::Mono],
                         IType::fun(IType::var(0), IType::var(0))
                     ))
@@ -2292,7 +2298,10 @@ mod tests {
 
         assert_elaborate_ok_1!(
             Val(id("a"), Type::Int),
-            Existential::from(HashMap::from_iter(Some((l("a"), AtomicTerm(IType::Int)))))
+            Existential::from(HashMap::from_iter(Some((
+                l("a"),
+                SemanticSig::default_atomic_term(IType::Int)
+            ))))
         );
 
         assert_elaborate_ok_1!(
@@ -2328,22 +2337,22 @@ mod tests {
             Seq(vec![Val(id("a"), Type::Int)]),
             Existential::from(StructureSig(HashMap::from_iter(vec![(
                 l("a"),
-                AtomicTerm(IType::Int)
+                SemanticSig::default_atomic_term(IType::Int)
             )])))
         );
 
         assert_elaborate_ok_1!(
             Seq(vec![Val(id("a"), Type::Int), Val(id("b"), Type::Int)]),
             Existential::from(StructureSig(HashMap::from_iter(vec![
-                (l("a"), AtomicTerm(IType::Int)),
-                (l("b"), AtomicTerm(IType::Int))
+                (l("a"), SemanticSig::default_atomic_term(IType::Int)),
+                (l("b"), SemanticSig::default_atomic_term(IType::Int))
             ])))
         );
 
         assert_elaborate_ok_1!(
             Seq(vec![Val(id("a"), Type::Int), ManType(id("b"), Type::Int)]),
             Existential::from(StructureSig(HashMap::from_iter(vec![
-                (l("a"), AtomicTerm(IType::Int)),
+                (l("a"), SemanticSig::default_atomic_term(IType::Int)),
                 (l("b"), AtomicType(IType::Int, IKind::Mono))
             ])))
         );
@@ -2451,14 +2460,14 @@ mod tests {
         let l = internal::Label::from;
 
         assert_subtype_ok!(
-            AtomicTerm(Int),
-            AtomicTerm(Int),
+            SemanticSig::default_atomic_term(Int),
+            SemanticSig::default_atomic_term(Int),
             Term::abs(Int, Term::app(Term::abs(Int, Term::var(0)), Term::var(0)))
         );
 
         assert_subtype_err!(
-            AtomicTerm(Int),
-            AtomicTerm(Type::fun(Int, Int)),
+            SemanticSig::default_atomic_term(Int),
+            SemanticSig::default_atomic_term(Type::fun(Int, Int)),
             TypeError::NotSubtype(Int, Type::fun(Int, Int))
         );
 
@@ -2496,14 +2505,14 @@ mod tests {
         );
 
         assert_subtype_ok!(
-            SemanticSig::structure_sig(Some((l("a"), AtomicTerm(Int)))),
+            SemanticSig::structure_sig(Some((l("a"), SemanticSig::default_atomic_term(Int)))),
             SemanticSig::structure_sig(None),
             Term::abs(Type::record(Some((l("a"), Int))), Term::record(None))
         );
 
         assert_subtype_ok!(
-            SemanticSig::structure_sig(Some((l("a"), AtomicTerm(Int)))),
-            SemanticSig::structure_sig(Some((l("a"), AtomicTerm(Int)))),
+            SemanticSig::structure_sig(Some((l("a"), SemanticSig::default_atomic_term(Int)))),
+            SemanticSig::structure_sig(Some((l("a"), SemanticSig::default_atomic_term(Int)))),
             Term::abs(
                 Type::record(Some((l("a"), Int))),
                 Term::record(Some((
@@ -2519,11 +2528,14 @@ mod tests {
         let t1 = Term::abs(Int, Term::app(Term::abs(Int, Term::var(0)), Term::var(0)));
         assert_subtype_ok!(
             SemanticSig::structure_sig(vec![
-                (l("a"), AtomicTerm(Int)),
-                (l("b"), AtomicTerm(Int)),
-                (l("c"), AtomicTerm(Int))
+                (l("a"), SemanticSig::default_atomic_term(Int)),
+                (l("b"), SemanticSig::default_atomic_term(Int)),
+                (l("c"), SemanticSig::default_atomic_term(Int))
             ]),
-            SemanticSig::structure_sig(vec![(l("a"), AtomicTerm(Int)), (l("b"), AtomicTerm(Int))]),
+            SemanticSig::structure_sig(vec![
+                (l("a"), SemanticSig::default_atomic_term(Int)),
+                (l("b"), SemanticSig::default_atomic_term(Int))
+            ]),
             Term::abs(
                 Type::record(vec![(l("a"), Int), (l("b"), Int), (l("c"), Int)]),
                 Term::record(vec![
@@ -2550,8 +2562,14 @@ mod tests {
 
         let l = Label::from;
 
-        assert_eq!(AtomicTerm(Int).first_apper(Variable(0)), None);
-        assert_eq!(AtomicTerm(Type::var(0)).first_apper(Variable(0)), None);
+        assert_eq!(
+            SemanticSig::default_atomic_term(Int).first_apper(Variable(0)),
+            None
+        );
+        assert_eq!(
+            SemanticSig::default_atomic_term(Type::var(0)).first_apper(Variable(0)),
+            None
+        );
 
         assert_eq!(AtomicType(Int, Mono).first_apper(Variable(0)), None);
         assert_eq!(
@@ -2635,7 +2653,7 @@ mod tests {
         let l = Label::from;
 
         assert_eq!(
-            AtomicTerm(Int).sort_quantifiers::<()>(vec![]),
+            SemanticSig::default_atomic_term(Int).sort_quantifiers::<()>(vec![]),
             (vec![], Subst::from_iter(vec![]))
         );
 
@@ -2817,44 +2835,103 @@ mod tests {
     #[test]
     fn skolemize() {
         use IType::Int;
-        use SemanticSig::*;
 
         let var = IType::var;
         let app = IType::app;
 
-        assert_skolemize!(AtomicTerm(Int), 0, 0, AtomicTerm(Int));
-
-        assert_skolemize!(AtomicTerm(var(0)), 0, 0, AtomicTerm(var(0)));
-        assert_skolemize!(AtomicTerm(var(0)), 1, 0, AtomicTerm(var(0)));
-        assert_skolemize!(AtomicTerm(var(0)), 0, 1, AtomicTerm(var(0)));
-        assert_skolemize!(AtomicTerm(var(0)), 1, 1, AtomicTerm(app(var(1), var(0))));
-
-        assert_skolemize!(AtomicTerm(var(1)), 0, 0, AtomicTerm(var(1)));
-        assert_skolemize!(AtomicTerm(var(1)), 1, 0, AtomicTerm(var(1)));
-        assert_skolemize!(AtomicTerm(var(1)), 0, 1, AtomicTerm(var(1)));
-        assert_skolemize!(AtomicTerm(var(1)), 1, 1, AtomicTerm(var(0)));
+        assert_skolemize!(
+            SemanticSig::default_atomic_term(Int),
+            0,
+            0,
+            SemanticSig::default_atomic_term(Int)
+        );
 
         assert_skolemize!(
-            AtomicTerm(var(0)),
+            SemanticSig::default_atomic_term(var(0)),
+            0,
+            0,
+            SemanticSig::default_atomic_term(var(0))
+        );
+        assert_skolemize!(
+            SemanticSig::default_atomic_term(var(0)),
+            1,
+            0,
+            SemanticSig::default_atomic_term(var(0))
+        );
+        assert_skolemize!(
+            SemanticSig::default_atomic_term(var(0)),
+            0,
+            1,
+            SemanticSig::default_atomic_term(var(0))
+        );
+        assert_skolemize!(
+            SemanticSig::default_atomic_term(var(0)),
+            1,
+            1,
+            SemanticSig::default_atomic_term(app(var(1), var(0)))
+        );
+
+        assert_skolemize!(
+            SemanticSig::default_atomic_term(var(1)),
+            0,
+            0,
+            SemanticSig::default_atomic_term(var(1))
+        );
+        assert_skolemize!(
+            SemanticSig::default_atomic_term(var(1)),
+            1,
+            0,
+            SemanticSig::default_atomic_term(var(1))
+        );
+        assert_skolemize!(
+            SemanticSig::default_atomic_term(var(1)),
+            0,
+            1,
+            SemanticSig::default_atomic_term(var(1))
+        );
+        assert_skolemize!(
+            SemanticSig::default_atomic_term(var(1)),
+            1,
+            1,
+            SemanticSig::default_atomic_term(var(0))
+        );
+
+        assert_skolemize!(
+            SemanticSig::default_atomic_term(var(0)),
             2,
             1,
-            AtomicTerm(app(app(var(2), var(0)), var(1)))
+            SemanticSig::default_atomic_term(app(app(var(2), var(0)), var(1)))
         );
-        assert_skolemize!(AtomicTerm(var(0)), 1, 2, AtomicTerm(app(var(1), var(0))));
         assert_skolemize!(
-            AtomicTerm(var(0)),
+            SemanticSig::default_atomic_term(var(0)),
+            1,
+            2,
+            SemanticSig::default_atomic_term(app(var(1), var(0)))
+        );
+        assert_skolemize!(
+            SemanticSig::default_atomic_term(var(0)),
             2,
             2,
-            AtomicTerm(app(app(var(2), var(0)), var(1)))
+            SemanticSig::default_atomic_term(app(app(var(2), var(0)), var(1)))
         );
 
-        assert_skolemize!(AtomicTerm(var(1)), 2, 1, AtomicTerm(var(0)));
-        assert_skolemize!(AtomicTerm(var(1)), 1, 2, AtomicTerm(app(var(2), var(0))));
         assert_skolemize!(
-            AtomicTerm(var(1)),
+            SemanticSig::default_atomic_term(var(1)),
+            2,
+            1,
+            SemanticSig::default_atomic_term(var(0))
+        );
+        assert_skolemize!(
+            SemanticSig::default_atomic_term(var(1)),
+            1,
+            2,
+            SemanticSig::default_atomic_term(app(var(2), var(0)))
+        );
+        assert_skolemize!(
+            SemanticSig::default_atomic_term(var(1)),
             2,
             2,
-            AtomicTerm(app(app(var(3), var(0)), var(1)))
+            SemanticSig::default_atomic_term(app(app(var(3), var(0)), var(1)))
         );
     }
 }
