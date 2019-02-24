@@ -2117,6 +2117,12 @@ impl SemanticPath {
                 .zip(sp.tys.iter())
                 .all(|(ty1, ty2)| ty1.equal(ty2))
     }
+    pub fn equal_type(&self, ty: &IType) -> bool {
+        self.tys
+            .iter()
+            .fold(IType::Var(self.v), |acc, ty| IType::app(acc, ty.clone()))
+            .equal(ty)
+    }
 }
 
 #[cfg(test)]
