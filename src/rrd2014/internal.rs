@@ -1836,7 +1836,7 @@ impl<T, S> Env<T, S> {
     }
 
     fn insert_dummy_value_at(&mut self, v: Variable) {
-        let n = self.venv.len() - v.get_index() - 1;
+        let n = self.venv.len() - v.get_index();
         self.venv.insert(n, None);
         self.nmap.values_mut().for_each(|i| {
             if *i >= n {
