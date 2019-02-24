@@ -479,6 +479,10 @@ trait Lift<RHS = Self> {
     fn lifted_by(self, another: &RHS) -> Self;
 }
 
+trait Pureness {
+    fn is_pure(&self) -> bool;
+}
+
 #[derive(Debug, Fail, PartialEq)]
 pub enum SemanticSigError {
     #[fail(display = "unexpected atomic semantic signature: {:?}", _0)]
@@ -574,6 +578,47 @@ impl Lift<Env> for Vec<(IKind, StemFrom)> {
         self.into_iter()
             .map(|(k, sf)| (IKind::fun_env(another, k), sf))
             .collect()
+    }
+}
+
+impl Pureness for Expr {
+    fn is_pure(&self) -> bool {
+        use Expr::*;
+        match *self {
+            Path(ref p) => p.is_pure(),
+            Pack(ref m, _) => m.is_pure(),
+            // In this implementation, the core language is purely functional.
+            _ => true,
+        }
+    }
+}
+
+impl Pureness for Path {
+    fn is_pure(&self) -> bool {
+        self.0.is_pure()
+    }
+}
+
+impl Pureness for Module {
+    fn is_pure(&self) -> bool {
+        use Module::*;
+        match *self {
+            App(..) | Unpack(..) => false,
+            Seq(ref bs) => bs.iter().all(|b| b.is_pure()),
+            Proj(ref m, _) => m.is_pure(),
+            _ => true,
+        }
+    }
+}
+
+impl Pureness for Binding {
+    fn is_pure(&self) -> bool {
+        use Binding::*;
+        match *self {
+            Val(_, ref e) => e.is_pure(),
+            Module(_, ref m) | Include(ref m) => m.is_pure(),
+            _ => true,
+        }
     }
 }
 
