@@ -247,6 +247,12 @@ impl From<usize> for SemanticPath {
     }
 }
 
+impl From<internal::Variable> for SemanticPath {
+    fn from(v: internal::Variable) -> Self {
+        SemanticPath { v, tys: Vec::new() }
+    }
+}
+
 impl From<Name> for Ident {
     fn from(name: Name) -> Self {
         Ident(name)
@@ -286,6 +292,12 @@ impl<'a> From<&'a Ident> for StemFrom {
             id: id.clone(),
             prefix: Default::default(),
         }
+    }
+}
+
+impl From<SemanticPath> for IType {
+    fn from(sp: SemanticPath) -> Self {
+        sp.tys.into_iter().fold(IType::Var(sp.v), IType::app)
     }
 }
 
@@ -1892,35 +1904,62 @@ impl SemanticSig {
         SemanticSig::AtomicTerm(SemanticPath::from(100_000), ty)
     }
 
-    fn lookup_instantiation(&self, ssig: &SemanticSig, v: internal::Variable) -> Option<IType> {
+    fn lookup_instantiation(&self, ssig: &SemanticSig, mut sp: SemanticPath) -> Option<IType> {
         use SemanticSig::*;
         match (self, ssig) {
+            (&AtomicTerm(ref sp1, _), &AtomicTerm(ref sp2, _)) => {
+                if sp.equal(sp2) {
+                    Some(sp1.clone().into())
+                } else {
+                    None
+                }
+            }
             (&AtomicType(ref ty1, _), &AtomicType(ref ty2, _)) => {
                 // Kind equality is later tested (maybe).
-                match *ty2 {
-                    IType::Var(v0) if v0 == v => Some(ty1.clone()),
-                    _ => None,
+                if sp.equal_type(ty2) {
+                    Some(ty1.clone())
+                } else {
+                    None
                 }
             }
             (&StructureSig(ref m1), &StructureSig(ref m2)) => {
                 for (l, ssig2) in m2.iter() {
                     if let Some(ssig1) = m1.get(l) {
-                        if let Some(ty) = ssig1.lookup_instantiation(ssig2, v) {
+                        if let Some(ty) = ssig1.lookup_instantiation(ssig2, sp.clone()) {
                             return Some(ty);
                         }
                     }
                 }
                 None
             }
+            (&Applicative(ref u1), &Applicative(ref u2)) => {
+                let self::Applicative(ref ssig11, ref ssig12) = *u1.0.body;
+                let self::Applicative(ref ssig21, ref ssig22) = *u2.0.body;
+                let tys = ssig21.lookup_instantiations(
+                    ssig11,
+                    (0..u1.0.qs.len()).map(internal::Variable::new).collect(),
+                );
+                let mut ssig12 = ssig12.clone();
+                ssig12.apply(&Subst::from_iter(
+                    (0..u1.0.qs.len()).map(internal::Variable::new).zip(tys),
+                ));
+                sp.append((0..u2.0.qs.len()).map(IType::var));
+                let ty = ssig12.lookup_instantiation(ssig22, sp)?;
+                Some(IType::abs(u2.0.qs.iter().rev().map(|p| p.0.clone()), ty))
+            }
             _ => None,
         }
     }
 
-    /// Looks up instantiations.
-    /// Assumes at least `ssig` is *explicit* (see section 5.2).
     fn lookup_instantiations(&self, ssig: &SemanticSig, vs: Vec<internal::Variable>) -> Vec<IType> {
-        vs.iter()
-            .map(|v| self.lookup_instantiation(ssig, *v).expect("not explicit"))
+        vs.into_iter()
+            .scan(ssig.clone(), |ssig, v| {
+                let x = self
+                    .lookup_instantiation(ssig, v.into())
+                    .expect("not explicit");
+                ssig.apply(&Subst::from_iter(Some((v, x.clone()))));
+                Some(x)
+            })
             .collect()
     }
 
@@ -2117,11 +2156,19 @@ impl SemanticPath {
                 .zip(sp.tys.iter())
                 .all(|(ty1, ty2)| ty1.equal(ty2))
     }
+
     pub fn equal_type(&self, ty: &IType) -> bool {
         self.tys
             .iter()
             .fold(IType::Var(self.v), |acc, ty| IType::app(acc, ty.clone()))
             .equal(ty)
+    }
+
+    fn append<I>(&mut self, tys: I)
+    where
+        I: IntoIterator<Item = IType>,
+    {
+        self.tys.extend(tys);
     }
 }
 
