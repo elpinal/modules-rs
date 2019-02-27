@@ -567,7 +567,7 @@ impl From<super::SemanticSig> for Type {
 impl<T: Into<Type>> From<super::Existential<T>> for Type {
     fn from(ex: super::Existential<T>) -> Self {
         Type::some(
-            ex.0.qs.into_iter().map(|p| p.0).collect::<Vec<_>>(),
+            ex.0.qs.into_iter().rev().map(|p| p.0).collect::<Vec<_>>(),
             ex.0.body.into(),
         )
     }
@@ -576,7 +576,7 @@ impl<T: Into<Type>> From<super::Existential<T>> for Type {
 impl<T: Into<Type>> From<super::Universal<T>> for Type {
     fn from(u: super::Universal<T>) -> Self {
         Type::forall(
-            u.0.qs.into_iter().map(|p| p.0).collect::<Vec<_>>(),
+            u.0.qs.into_iter().rev().map(|p| p.0).collect::<Vec<_>>(),
             u.0.body.into(),
         )
     }
