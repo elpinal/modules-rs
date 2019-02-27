@@ -1216,7 +1216,6 @@ impl Elaboration for Module {
                             })
                             .collect()
                     })
-                    .rev()
                     .flatten()
                     .collect();
                 let p_all = memory.iter().fold(Pure, |acc, entry| acc.join(entry.1));
@@ -1253,7 +1252,7 @@ impl Elaboration for Module {
                             ),
                         ),
                         (0..qs.len()).map(IType::var).collect(),
-                        qs.iter().map(|p| p.0.clone()),
+                        qs.iter().map(|p| p.0.clone()).rev(),
                         SemanticSig::StructureSig(body.clone()).into(),
                     ),
                     |t0, BindingInformation { t, n, .. }| ITerm::unpack(t, n, t0),
