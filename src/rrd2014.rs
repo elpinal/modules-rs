@@ -164,6 +164,8 @@ struct BindingInformation {
     w: Vec<ITerm>,
 }
 
+type Memory<T, S> = Vec<(EnvAbs<T, S>, Purity, Vec<Label>, usize, usize, usize)>;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Purity {
     Pure,
@@ -1138,7 +1140,8 @@ impl Elaboration for Module {
                 let mut n = 0;
                 let mut z = 0;
                 let mut d = 0;
-                let mut memory: Vec<(EnvAbs<_, _>, Purity, Vec<Label>, usize)> = Vec::new();
+                let mut memory: Memory<_, _> = Vec::new();
+                let mut qs_count = 0;
                 let enter_state = env.get_state();
                 for (i, b) in bs.iter().enumerate() {
                     let (t, ex, s, p) = b.elaborate(env)?;
@@ -1150,7 +1153,10 @@ impl Elaboration for Module {
                         p,
                         ex.0.body.keys().cloned().collect(),
                         z,
+                        qs_count,
+                        d,
                     ));
+                    qs_count += len;
                     n += if len == 0 { 1 } else { len };
                     let n0 = n;
                     ret_subst = ret_subst.compose(s.clone());
@@ -1172,12 +1178,13 @@ impl Elaboration for Module {
                     }
                     let t = ITerm::let_in(
                         (0..i).flat_map(|j| {
-                            let (ref ea, p0, ref ls, i0) = memory[j];
+                            let (ref ea, p0, ref ls, i0, _, _) = memory[j];
                             ls.iter().enumerate().map(move |(k, l)| {
                                 ITerm::abs_env_purity(
                                     ea.clone(),
                                     p.join(p0),
                                     ITerm::proj(
+                                        // TODO: `app_env_purity_skip`?
                                         ITerm::app_env_purity(
                                             ITerm::var(z0 - i0 + j + k),
                                             ea.clone(),
@@ -1192,6 +1199,7 @@ impl Elaboration for Module {
                     );
                     v.push(BindingInformation { t, n: len, w });
                 }
+                let ea_last = EnvAbs::from(&*env);
                 env.drop_values_state(n, enter_state);
                 env.drop_types(qs.len());
                 let mut n0 = 0;
@@ -1212,26 +1220,35 @@ impl Elaboration for Module {
                     .flatten()
                     .collect();
                 let p_all = memory.iter().fold(Pure, |acc, entry| acc.join(entry.1));
+                let mut j = 0;
                 let t = v.into_iter().rfold(
                     ITerm::pack(
                         ITerm::abs_env_purity(
                             env,
                             p_all,
                             ITerm::let_in(
-                                memory.iter().enumerate().flat_map(
-                                    |(j, &(ref ea, p0, ref ls, i0))| {
-                                        ls.iter().enumerate().map(move |(k, l)| {
-                                            ITerm::proj(
-                                                ITerm::app_env_purity(
-                                                    ITerm::var(z - i0 + j + k),
-                                                    ea.clone(),
-                                                    p0,
-                                                ),
-                                                Some(l.clone()),
-                                            )
-                                        })
-                                    },
-                                ),
+                                memory
+                                    .iter()
+                                    .flat_map(|&(_, p0, ref ls, i0, qs_count0, d0)| {
+                                        ls.iter()
+                                            .map(|l| {
+                                                let ret = ITerm::proj(
+                                                    ITerm::app_env_purity_skip(
+                                                        ITerm::var(z - i0 + j),
+                                                        ea_last.clone(),
+                                                        p0,
+                                                        qs_count - qs_count0,
+                                                        d - d0,
+                                                        0,
+                                                    ),
+                                                    Some(l.clone()),
+                                                );
+                                                j += 1;
+                                                ret
+                                            })
+                                            .collect::<Vec<_>>()
+                                    })
+                                    .collect::<Vec<_>>(),
                                 ITerm::record(m),
                             ),
                         ),

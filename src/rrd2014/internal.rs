@@ -1230,30 +1230,57 @@ impl Term {
         }
     }
 
-    pub fn app_env<U, T, S>(t: Term, env: U) -> Self
+    // TODO: parameter `vn` may be unneeded.
+    fn app_env_skip<U, T, S>(t: Term, env: U, tskip: usize, vskip: usize, vn: usize) -> Self
     where
         U: Into<EnvAbs<T, S>>,
     {
         let env = env.into();
-        let t = (0..env.tenv.len()).rfold(t, |acc, n| Term::inst(acc, Some(Type::var(n))));
-        env.venv.iter().rev().enumerate().rfold(t, |acc, (i, ty)| {
-            if ty.is_some() {
-                Term::app(acc, Term::var(i))
-            } else {
-                acc
-            }
-        })
+        let t = (tskip..env.tenv.len()).rfold(t, |acc, i| Term::inst(acc, Some(Type::var(i))));
+        env.venv
+            .iter()
+            .rev()
+            .skip(vskip)
+            .enumerate()
+            .rfold(t, |acc, (i, ty)| {
+                if ty.is_some() {
+                    Term::app(acc, Term::var(i + vn))
+                } else {
+                    acc
+                }
+            })
+    }
+
+    pub fn app_env<U, T, S>(t: Term, env: U) -> Self
+    where
+        U: Into<EnvAbs<T, S>>,
+    {
+        Term::app_env_skip(t, env, 0, 0, 0)
+    }
+
+    pub fn app_env_purity_skip<U, T, S>(
+        t: Term,
+        env: U,
+        p: Purity,
+        tskip: usize,
+        vskip: usize,
+        vn: usize,
+    ) -> Self
+    where
+        U: Into<EnvAbs<T, S>>,
+    {
+        if p.is_pure() {
+            Term::app_env_skip(t, env, tskip, vskip, vn)
+        } else {
+            t
+        }
     }
 
     pub fn app_env_purity<U, T, S>(t: Term, env: U, p: Purity) -> Self
     where
         U: Into<EnvAbs<T, S>>,
     {
-        if p.is_pure() {
-            Term::app_env(t, env)
-        } else {
-            t
-        }
+        Term::app_env_purity_skip(t, env, p, 0, 0, 0)
     }
 
     /// Creates a successive projection.
