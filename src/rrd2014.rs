@@ -1349,7 +1349,32 @@ impl Elaboration for Module {
                 env.drop_values_state(1, enter_state);
                 env.drop_types(asig1.0.qs.len());
                 if p.is_pure() {
-                    unimplemented!();
+                    use internal::Variable::Variable as V;
+
+                    let mut asig1 = asig1;
+                    asig1.shift(isize::try_from(asig2.0.qs.len()).unwrap());
+
+                    let m = asig1.0.qs.len();
+                    let n = asig2.0.qs.len();
+                    let s = Subst::from_iter(
+                        (0..n)
+                            .map(|i| (i, i + m))
+                            .chain((0..m).map(|i| (n + i, i)))
+                            .map(|(i, j)| (V(i), IType::var(j))),
+                    );
+
+                    return Ok((
+                        t,
+                        asig2.map(|mut ssig2| {
+                            ssig2.apply(&s);
+                            SemanticSig::Applicative(
+                                Universal::from(asig1)
+                                    .map(|ssig1| Box::new(Applicative(ssig1, ssig2))),
+                            )
+                        }),
+                        s1.compose(s2),
+                        Pure,
+                    ));
                 }
                 Ok((
                     ITerm::abs_env(
