@@ -1240,23 +1240,58 @@ impl Elaboration for Module {
                 let t = v.into_iter().rfold(
                     ITerm::pack(
                         ITerm::abs_env_purity(
-                            env,
+                            &*env,
                             p_all,
                             ITerm::let_in(
                                 memory
                                     .iter()
                                     .flat_map(|&(_, p0, ref ls, i0, qs_count0, d0)| {
                                         ls.iter()
-                                            .map(|l| {
+                                            .enumerate()
+                                            .map(|(q, l)| {
                                                 let ret = ITerm::proj(
-                                                    ITerm::app_env_purity_skip(
-                                                        ITerm::var(z - i0 + j),
-                                                        ea_last.clone(),
-                                                        p0,
-                                                        qs_count - qs_count0,
-                                                        d - d0,
-                                                        0,
-                                                    ),
+                                                    if p_all.is_pure() {
+                                                        if p0.is_impure() {
+                                                            ITerm::var(
+                                                                z - i0
+                                                                    + j
+                                                                    + env
+                                                                        .venv_abs_len_purity(p_all),
+                                                            )
+                                                        } else {
+                                                            (0..(d0 + env.venv_abs_len_purity(Pure))).rfold(
+                                                            (0..qs_count0).rfold(
+                                                            (0..env.tenv_len()).rfold(
+                                                                ITerm::var(
+                                                                    z - i0
+                                                                        + j
+                                                                        + env.venv_abs_len_purity(
+                                                                            p_all,
+                                                                        ),
+                                                                ),
+                                                                |acc, i| {
+                                                                    ITerm::inst(
+                                                                        acc,
+                                                                        Some(IType::var(i)),
+                                                                    )
+                                                                },
+                                                            ), |acc, i| ITerm::inst(acc, Some(IType::var(qs_count - i)))), |acc, i| ITerm::app(acc, ITerm::var(i + q)))
+                                                        }
+                                                    } else {
+                                                        ITerm::app_env_purity_skip(
+                                                            ITerm::var(
+                                                                z - i0
+                                                                    + j
+                                                                    + env
+                                                                        .venv_abs_len_purity(p_all),
+                                                            ),
+                                                            ea_last.clone(),
+                                                            p0,
+                                                            qs_count - qs_count0,
+                                                            d - d0,
+                                                            0,
+                                                        )
+                                                    },
                                                     Some(l.clone()),
                                                 );
                                                 j += 1;
