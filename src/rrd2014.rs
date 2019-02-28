@@ -1072,12 +1072,12 @@ impl Elaboration for Binding {
                                 )]),
                             ),
                             (0..asig.0.qs.len()).map(IType::var).collect(),
-                            asig.0.qs.iter().map(|p| p.0.clone()),
-                            StructureSig(HashMap::from_iter(Some((
-                                Label::from(id.clone()),
-                                asig.0.body.clone(),
-                            ))))
-                            .into(),
+                            asig.0.qs.iter().map(|p| p.0.clone()).rev(),
+                            IType::forall_env_purity(
+                                env,
+                                p,
+                                IType::record(Some((Label::from(id), asig.0.body.clone().into()))),
+                            ),
                         ),
                     ),
                     asig.map(|ssig| HashMap::from_iter(vec![(Label::from(id.clone()), ssig)])),
