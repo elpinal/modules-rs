@@ -973,14 +973,17 @@ impl Elaboration for Binding {
                         ));
                     }
                     _ if e.is_pure() => {
-                        let (t, ty, s) = e.elaborate(env)?;
+                        let (mut t, ty, s) = e.elaborate(env)?;
+                        let (scheme, s1, ks) = ty.close(env);
+                        t.shift(isize::try_from(ks.len()).unwrap());
+                        t.apply(&s1);
                         return Ok((
                             ITerm::pack(
                                 ITerm::abs_env(
                                     &*env,
                                     ITerm::record(Some((
                                         id.into(),
-                                        ITerm::from(SemanticTerm::Term(t)),
+                                        ITerm::poly(ks, ITerm::from(SemanticTerm::Term(t))),
                                     ))),
                                 ),
                                 vec![IType::abs_env(&*env, IType::record(None))],
@@ -997,7 +1000,7 @@ impl Elaboration for Binding {
                                                     .map(|n| IType::var(n + 1))
                                                     .collect(),
                                             },
-                                            ty.clone(),
+                                            scheme.clone(),
                                         )),
                                     ))),
                                 ),
@@ -1014,7 +1017,7 @@ impl Elaboration for Binding {
                                                 .map(|n| IType::var(n + 1))
                                                 .collect(),
                                         },
-                                        ty,
+                                        scheme,
                                     ),
                                 ))),
                             }),
