@@ -339,8 +339,25 @@ impl Substitution for Applicative {
 
 impl Substitution for SemanticPath {
     fn apply(&mut self, s: &Subst) {
-        // TODO: How about `self.v`?
+        use IType::*;
         self.tys.iter_mut().for_each(|ty| ty.apply(s));
+        let mut ty = self.v.apply_subst(s);
+        let mut w = Vec::new();
+        loop {
+            match ty {
+                Var(v) => {
+                    self.v = v;
+                    w.append(&mut self.tys);
+                    self.tys = w;
+                    return;
+                }
+                App(ty1, ty2) => {
+                    w.push(*ty2);
+                    ty = *ty1;
+                }
+                _ => panic!("substitution of semantic paths: unexpected error"),
+            }
+        }
     }
 }
 

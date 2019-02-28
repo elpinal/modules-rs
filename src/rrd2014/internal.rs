@@ -700,6 +700,14 @@ impl Variable {
             Variable::Generated(n) => panic!("get_index: unexpected generated variable: {}", n),
         }
     }
+
+    pub fn apply_subst(self, s: &Subst) -> Type {
+        if let Option::Some(ty) = s.0.get(&self) {
+            ty.clone()
+        } else {
+            Type::Var(self)
+        }
+    }
 }
 
 impl FromIterator<(Variable, Type)> for Subst {
