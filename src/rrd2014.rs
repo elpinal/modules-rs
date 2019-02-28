@@ -614,9 +614,14 @@ impl SemanticSig {
         }
     }
 
-    fn get_functor(self) -> Result<Universal<Fun>, SemanticSigError> {
+    fn get_functor(
+        self,
+    ) -> Result<(Universal<(SemanticSig, AbstractSig)>, Purity), SemanticSigError> {
+        use Purity::*;
+        use SemanticSig::*;
         match self {
-            SemanticSig::FunctorSig(u) => Ok(u.map(|f| *f)),
+            FunctorSig(u) => Ok((u.map(|f| Functorize::get_function(*f)), Impure)),
+            Applicative(u) => Ok((u.map(|f| Functorize::get_function(*f)), Pure)),
             _ => Err(SemanticSigError::Functor(self)),
         }
     }
@@ -1434,10 +1439,8 @@ impl Elaboration for Module {
             App(ref id1, ref id2) => {
                 let (ssig1, v1) = env.lookup_value_by_name(id1.into())?;
                 let (ssig2, v2) = env.lookup_value_by_name(id2.into())?;
-                // FIXME: Support applicative functors.
-                let u = ssig1.get_functor()?;
-                let p = Impure;
-                let self::Fun(ssig1, mut asig1) = u.0.body;
+                let (u, p) = ssig1.get_functor()?;
+                let (ssig1, mut asig1) = u.0.body;
                 let len = u.0.qs.len();
                 let (t, tys) = ssig2.r#match(
                     env,
@@ -2214,6 +2217,22 @@ impl Functional for Applicative {
 
     fn ref_function(&self) -> (&SemanticSig, &Self::Range) {
         (&self.0, &self.1)
+    }
+}
+
+trait Functorize {
+    fn get_function(self) -> (SemanticSig, AbstractSig);
+}
+
+impl Functorize for Fun {
+    fn get_function(self) -> (SemanticSig, AbstractSig) {
+        (self.0, self.1)
+    }
+}
+
+impl Functorize for Applicative {
+    fn get_function(self) -> (SemanticSig, AbstractSig) {
+        (self.0, Existential::from(self.1))
     }
 }
 
