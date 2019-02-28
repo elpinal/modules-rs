@@ -1176,25 +1176,38 @@ impl Elaboration for Module {
                         d += 1;
                         env.insert_value(Name::try_from(l).unwrap(), ssig);
                     }
+                    let mut j = 0;
                     let t = ITerm::let_in(
-                        (0..i).flat_map(|j| {
-                            let (ref ea, p0, ref ls, i0, _, _) = memory[j];
-                            ls.iter().enumerate().map(move |(k, l)| {
-                                ITerm::abs_env_purity(
-                                    ea.clone(),
-                                    p.join(p0),
-                                    ITerm::proj(
-                                        // TODO: `app_env_purity_skip`?
-                                        ITerm::app_env_purity(
-                                            ITerm::var(z0 - i0 + j + k),
+                        memory[..i]
+                            .iter()
+                            .flat_map(|&(ref ea, p0, ref ls, i0, _, _)| {
+                                ls.iter()
+                                    .map(|l| {
+                                        let ret = ITerm::abs_env_purity(
                                             ea.clone(),
-                                            p0,
-                                        ),
-                                        Some(l.clone()),
-                                    ),
-                                )
+                                            p.join(p0),
+                                            ITerm::proj(
+                                                ITerm::app_env_purity_skip(
+                                                    ITerm::var(
+                                                        z0 - i0
+                                                            + j
+                                                            + ea.venv_abs_len_purity(p.join(p0)),
+                                                    ),
+                                                    ea.clone(),
+                                                    p0,
+                                                    0,
+                                                    0,
+                                                    0,
+                                                ),
+                                                Some(l.clone()),
+                                            ),
+                                        );
+                                        j += 1;
+                                        ret
+                                    })
+                                    .collect::<Vec<_>>()
                             })
-                        }),
+                            .collect::<Vec<_>>(),
                         t,
                     );
                     v.push(BindingInformation { t, n: len, w });

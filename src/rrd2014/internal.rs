@@ -1954,6 +1954,16 @@ impl<T, S> Env<T, S> {
     }
 }
 
+impl<T, S> EnvAbs<T, S> {
+    pub fn venv_abs_len_purity(&self, p: Purity) -> usize {
+        if p.is_pure() {
+            self.venv.iter().filter(|x| x.is_some()).count()
+        } else {
+            0
+        }
+    }
+}
+
 impl<'a, T: Clone, S: Clone> From<&'a Env<T, S>> for EnvAbs<T, S> {
     fn from(env: &'a Env<T, S>) -> EnvAbs<T, S> {
         EnvAbs {
