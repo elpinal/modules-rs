@@ -1068,7 +1068,11 @@ impl Elaboration for Binding {
                                 p,
                                 ITerm::record(vec![(
                                     Label::from(id),
-                                    ITerm::app_env_purity(ITerm::var(0), &*env, p),
+                                    ITerm::app_env_purity(
+                                        ITerm::var(env.venv_abs_len_purity(p)),
+                                        &*env,
+                                        p,
+                                    ),
                                 )]),
                             ),
                             (0..asig.0.qs.len()).map(IType::var).collect(),
@@ -1297,6 +1301,7 @@ impl Elaboration for Module {
                                 &*env,
                                 p,
                                 ITerm::proj(
+                                    // TODO: maybe wrong: 0.
                                     ITerm::app_env_purity(ITerm::var(0), &*env, p),
                                     Some(id.into()),
                                 ),

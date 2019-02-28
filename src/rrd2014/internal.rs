@@ -1770,6 +1770,14 @@ impl<T, S> Env<T, S> {
         self.tenv.len()
     }
 
+    pub fn venv_abs_len_purity(&self, p: Purity) -> usize {
+        if p.is_pure() {
+            self.venv.iter().filter(|x| x.is_some()).count()
+        } else {
+            0
+        }
+    }
+
     pub fn lookup_type(&self, v: Variable) -> Result<(Kind, S), EnvError>
     where
         S: Clone + Default,
