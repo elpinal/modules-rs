@@ -902,7 +902,7 @@ impl Parser {
     }
 }
 
-fn parse<I>(src: I) -> Fallible<Module>
+pub fn parse<I>(src: I) -> Fallible<Module>
 where
     I: IntoIterator<Item = char>,
 {
