@@ -807,6 +807,10 @@ impl Type {
         (0..env.tenv.len()).rfold(ty, |acc, n| Type::app(acc, Type::var(n)))
     }
 
+    fn trivial() -> Self {
+        Type::record(None)
+    }
+
     pub fn forall_env<T, S>(env: &Env<T, S>, ty: Type) -> Self
     where
         T: Clone + Into<Type>,
@@ -815,7 +819,7 @@ impl Type {
             if let Some(ref ty) = *ty {
                 Type::fun(ty.clone().into(), acc)
             } else {
-                acc
+                Type::fun(Type::trivial(), acc)
             }
         });
         env.tenv
@@ -1289,7 +1293,7 @@ impl Term {
             if let Some(ref ty) = *ty {
                 Term::abs(ty.clone().into(), acc)
             } else {
-                acc
+                Term::abs(Type::trivial(), acc)
             }
         });
         env.tenv
@@ -1310,7 +1314,11 @@ impl Term {
         }
     }
 
-    // TODO: parameter `vn` may be unneeded.
+    fn trivial() -> Self {
+        Term::record(None)
+    }
+
+    // TODO: parameter `vn` might be unneeded.
     fn app_env_skip<U, T, S>(t: Term, env: U, tskip: usize, vskip: usize, vn: usize) -> Self
     where
         U: Into<EnvAbs<T, S>>,
@@ -1326,7 +1334,7 @@ impl Term {
                 if ty.is_some() {
                     Term::app(acc, Term::var(i + vn))
                 } else {
-                    acc
+                    Term::app(acc, Term::trivial())
                 }
             })
     }
