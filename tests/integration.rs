@@ -18,4 +18,14 @@ fn test_execution() {
          val y = 1
          end"
     );
+
+    assert_exec!(
+        "struct
+           module M = struct end
+
+           module W = struct
+             val x = 1
+           end
+         end"
+    );
 }

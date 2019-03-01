@@ -1330,7 +1330,11 @@ impl Elaboration for Module {
                         ),
                         (0..qs.len()).map(IType::var).collect(),
                         qs.iter().map(|p| p.0.clone()).rev(),
-                        SemanticSig::StructureSig(body.clone()).into(),
+                        IType::forall_env_purity(
+                            env,
+                            p_all,
+                            SemanticSig::StructureSig(body.clone()).into()
+                        ),
                     ),
                     |t0, BindingInformation { t, n, .. }| ITerm::unpack(t, n, t0),
                 );
