@@ -1285,7 +1285,7 @@ impl Elaboration for Module {
                                                             )
                                                         } else {
                                                             (0..(d0 + env.venv_abs_len_purity(Pure))).rfold(
-                                                            (0..qs_count0).rfold(
+                                                            (1..=qs_count0).rfold(
                                                             (0..env.tenv_len()).rfold(
                                                                 ITerm::var(
                                                                     z - i0
@@ -1300,7 +1300,7 @@ impl Elaboration for Module {
                                                                         Some(IType::var(i)),
                                                                     )
                                                                 },
-                                                            ), |acc, i| ITerm::inst(acc, Some(IType::var(qs_count - i)))), |acc, i| ITerm::app(acc, ITerm::var(i + q)))
+                                                            ), |acc, i| ITerm::inst(acc, Some(IType::var(qs_count - i + env.tenv_len())))), |acc, i| ITerm::app(acc, ITerm::var(i + q)))
                                                         }
                                                     } else {
                                                         ITerm::app_env_purity_skip(
