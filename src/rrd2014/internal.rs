@@ -180,6 +180,9 @@ pub enum TypeError {
 
     #[fail(display = "in application of {:?} to {:?}: {}", _0, _1, _2)]
     Application(Box<Term>, Box<Term>, Box<TypeError>),
+
+    #[fail(display = "in packing [{:?}, {:?}] as {:?}: {}", _0, _1, _2, _3)]
+    Pack(Box<Type>, Box<Term>, Box<Type>, Box<TypeError>),
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -1745,7 +1748,12 @@ impl Term {
                             if ty0.equal(&ty) {
                                 Ok(ty2.clone())
                             } else {
-                                Err(TypeError::TypeMismatch(ty0, ty))
+                                Err(TypeError::Pack(
+                                    Box::new(ty1.clone()),
+                                    t.clone(),
+                                    Box::new(ty2.clone()),
+                                    Box::new(TypeError::TypeMismatch(ty0, ty)),
+                                ))
                             }
                         } else {
                             Err(TypeError::KindError(KindError::KindMismatch(
