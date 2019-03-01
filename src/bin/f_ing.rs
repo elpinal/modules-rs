@@ -39,6 +39,10 @@ enum Opt {
         /// Input filename
         #[structopt(name = "filename")]
         file: String,
+
+        /// Output filename
+        #[structopt(short = "o")]
+        output: Option<String>,
     },
 
     #[structopt(name = "typecheck-internal")]
@@ -70,13 +74,16 @@ fn run(opt: Opt) -> Result<(), Error> {
         Opt::Parse { file } => {
             println!("{:?}", parse(file)?);
         }
-        Opt::Typecheck { file } => match elaborate(parse(file)?)? {
+        Opt::Typecheck { file, output } => match elaborate(parse(file)?)? {
             (t, asig, _) => {
                 println!("{}:", "signature".bright_cyan().bold());
                 println!("{:?}", asig);
                 println!();
                 println!("{}:", "translated F\u{03c9} term".bright_cyan().bold());
                 println!("{:?}", t);
+                if let Some(f) = output {
+                    std::fs::write(f, format!("{:#?}", t))?;
+                }
             }
         },
         Opt::TypecheckInternal { file } => match elaborate(parse(file)?)? {
