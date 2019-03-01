@@ -1909,15 +1909,9 @@ impl Expr {
                     .mono()
                     .map_err(TypeError::NotMono)?;
                 let (ty, tys) = ty.new_instance(env);
-                Ok((
-                    ITerm::unpack(
-                        t,
-                        qs.len(),
-                        ITerm::inst(ITerm::app_env_purity(ITerm::var(0), env, p), tys),
-                    ),
-                    ty,
-                    s,
-                ))
+                let mut t1 = ITerm::app_env_purity_skip(ITerm::var(0), env, p, 0, 0, 1);
+                t1.shift(isize::try_from(qs.len()).unwrap());
+                Ok((ITerm::unpack(t, qs.len(), ITerm::inst(t1, tys)), ty, s))
             }
             Pack(ref m, ref sig) => {
                 let (t2, asig0, s1, p) = m.elaborate(env)?;
