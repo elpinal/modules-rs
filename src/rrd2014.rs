@@ -1285,7 +1285,7 @@ impl Elaboration for Module {
                                                             )
                                                         } else {
                                                             (0..(d0 + env.venv_abs_len_purity(Pure))).rfold(
-                                                            (1..=qs_count0).rfold(
+                                                            (1..=qs_count0).fold(
                                                             (0..env.tenv_len()).rfold(
                                                                 ITerm::var(
                                                                     z - i0

@@ -28,4 +28,12 @@ fn test_execution() {
            end
          end"
     );
+
+    assert_exec!(
+        "struct
+           val a = 1
+           val b = 1
+           val c = 1
+         end"
+    );
 }
