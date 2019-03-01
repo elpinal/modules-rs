@@ -1371,6 +1371,25 @@ impl Term {
         Term::app_env_purity_skip(t, env, p, 0, 0, 0)
     }
 
+    pub fn app_env_seq<U, T, S>(t: Term, env: U, vskip: usize, vn: usize) -> Self
+    where
+        U: Into<EnvAbs<T, S>>,
+    {
+        env.into()
+            .venv
+            .iter()
+            .rev()
+            .skip(vskip)
+            .enumerate()
+            .rfold(t, |acc, (i, ty)| {
+                if ty.is_some() {
+                    Term::app(acc, Term::var(i + vn))
+                } else {
+                    Term::app(acc, Term::trivial())
+                }
+            })
+    }
+
     /// Creates a successive projection.
     ///
     /// # Examples

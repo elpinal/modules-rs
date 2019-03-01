@@ -1264,7 +1264,7 @@ impl Elaboration for Module {
                             ITerm::let_in(
                                 memory
                                     .iter()
-                                    .flat_map(|&(_, p0, ref ls, i0, qs_count0, d0)| {
+                                    .flat_map(|&(ref ea, p0, ref ls, i0, qs_count0, d0)| {
                                         ls.iter()
                                             .enumerate()
                                             .map(|(q, l)| {
@@ -1274,35 +1274,47 @@ impl Elaboration for Module {
                                                             ITerm::var(
                                                                 z - i0
                                                                     + j
-                                                                    + env
-                                                                        .venv_len_purity(p_all),
+                                                                    + env.venv_len_purity(p_all),
                                                             )
                                                         } else {
-                                                            (0..(d0 + env.venv_len_purity(Pure))).rfold(
+                                                            ITerm::app_env_seq(
                                                             (1..=qs_count0).fold(
-                                                            (0..env.tenv_len()).rfold(
-                                                                ITerm::var(
-                                                                    z - i0
-                                                                        + j
-                                                                        + env.venv_len_purity(
-                                                                            p_all,
-                                                                        ),
+                                                                (0..env.tenv_len()).rfold(
+                                                                    ITerm::var(
+                                                                        z - i0
+                                                                            + j
+                                                                            + env.venv_len_purity(
+                                                                                p_all,
+                                                                            ),
+                                                                    ),
+                                                                    |acc, i| {
+                                                                        ITerm::inst(
+                                                                            acc,
+                                                                            Some(IType::var(i)),
+                                                                        )
+                                                                    },
                                                                 ),
                                                                 |acc, i| {
                                                                     ITerm::inst(
                                                                         acc,
-                                                                        Some(IType::var(i)),
+                                                                        Some(IType::var(
+                                                                            qs_count - i
+                                                                                + env.tenv_len(),
+                                                                        )),
                                                                     )
                                                                 },
-                                                            ), |acc, i| ITerm::inst(acc, Some(IType::var(qs_count - i + env.tenv_len())))), |acc, i| ITerm::app(acc, ITerm::var(i + q)))
+                                                            ),
+                                                            ea.clone(),
+                                                            0,
+                                                            q,
+                                                            )
                                                         }
                                                     } else {
                                                         ITerm::app_env_purity_skip(
                                                             ITerm::var(
                                                                 z - i0
                                                                     + j
-                                                                    + env
-                                                                        .venv_len_purity(p_all),
+                                                                    + env.venv_len_purity(p_all),
                                                             ),
                                                             ea_last.clone(),
                                                             p0,
@@ -1327,7 +1339,7 @@ impl Elaboration for Module {
                         IType::forall_env_purity(
                             env,
                             p_all,
-                            SemanticSig::StructureSig(body.clone()).into()
+                            SemanticSig::StructureSig(body.clone()).into(),
                         ),
                     ),
                     |t0, BindingInformation { t, n, .. }| ITerm::unpack(t, n, t0),
