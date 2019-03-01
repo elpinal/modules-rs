@@ -183,6 +183,9 @@ pub enum TypeError {
 
     #[fail(display = "in packing [{:?}, {:?}] as {:?}: {}", _0, _1, _2, _3)]
     Pack(Box<Type>, Box<Term>, Box<Type>, Box<TypeError>),
+
+    #[fail(display = "instantiation of {:?} with {:?}: {}", _0, _1, _2)]
+    Inst(Box<Term>, Type, KindError),
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -1728,7 +1731,11 @@ impl Term {
                             ty.subst_top(&mut ty2.clone());
                             Ok(*ty)
                         } else {
-                            Err(TypeError::KindError(KindError::KindMismatch(k1, k2)))
+                            Err(TypeError::Inst(
+                                t.clone(),
+                                ty2.clone(),
+                                KindError::KindMismatch(k1, k2),
+                            ))
                         }
                     }
                     _ => Err(TypeError::NotForall(ty1)),
