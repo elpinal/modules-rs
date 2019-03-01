@@ -1181,13 +1181,13 @@ impl Type {
         }
     }
 
-    fn split_universal_quantifiers(&self) -> (usize, Type) {
+    fn split_universal_quantifiers(&self, v: &mut Vec<Kind>) -> Type {
         match *self {
-            Type::Forall(_, ref ty) => {
-                let (n, ty) = ty.split_universal_quantifiers();
-                (n + 1, ty)
+            Type::Forall(ref k, ref ty) => {
+                v.push(k.clone());
+                ty.split_universal_quantifiers(v)
             }
-            _ => (0, self.clone()),
+            _ => self.clone(),
         }
     }
 
@@ -1202,6 +1202,9 @@ impl Type {
                 Ok(())
             }
             (&Int, _) | (&Bool, _) | (&Fun(..), _) => Err(()),
+            (&Var(Variable::Generated(_)), _) => {
+                unimplemented!();
+            }
             (&Var(V(i)), _) if i >= n => {
                 if self == ty {
                     Ok(())
@@ -1222,14 +1225,26 @@ impl Type {
         }
     }
 
-    pub fn is_general(&self, ty: &Type) -> Result<Subst, ()> {
-        let (m, mut ty1) = self.split_universal_quantifiers();
-        let (n, mut ty2) = ty.split_universal_quantifiers();
+    pub fn is_general(&self, ty: &Type) -> Result<(Vec<Type>, Vec<Kind>), ()> {
+        let (mut ty1, m) = {
+            let mut v = Vec::new();
+            let ty1 = self.split_universal_quantifiers(&mut v);
+            (ty1, v.len())
+        };
+        let mut v = Vec::new();
+        let mut ty2 = ty.split_universal_quantifiers(&mut v);
+        let n = v.len();
         ty2.shift(isize::try_from(m).unwrap());
         ty1.shift_above(m, isize::try_from(n).unwrap());
         let mut s = Subst::default();
         ty1.is_general_aux(m, &mut s, &ty2)?;
-        Ok(s)
+        Ok((
+            (0..m)
+                .rev()
+                .map(|i| s.0.remove(&V(i)).expect("unexpected error"))
+                .collect(),
+            v,
+        ))
     }
 }
 

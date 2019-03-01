@@ -1532,8 +1532,11 @@ impl Subtype for IType {
     type Error = TypeError;
 
     fn subtype_of(&self, _: &mut Env, another: &Self) -> Result<ITerm, Self::Error> {
-        if self.equal(another) {
-            Ok(ITerm::abs(self.clone(), ITerm::var(0)))
+        if let Ok((tys, v)) = self.is_general(another) {
+            Ok(ITerm::abs(
+                self.clone(),
+                ITerm::poly(v.into_iter().rev(), ITerm::inst(ITerm::var(0), tys)),
+            ))
         } else {
             Err(TypeError::NotSubtype(self.clone(), another.clone()))
         }
