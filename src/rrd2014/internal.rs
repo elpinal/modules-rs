@@ -1180,6 +1180,57 @@ impl Type {
             }
         }
     }
+
+    fn split_universal_quantifiers(&self) -> (usize, Type) {
+        match *self {
+            Type::Forall(_, ref ty) => {
+                let (n, ty) = ty.split_universal_quantifiers();
+                (n + 1, ty)
+            }
+            _ => (0, self.clone()),
+        }
+    }
+
+    fn is_general_aux(&self, n: usize, s: &mut Subst, ty: &Type) -> Result<(), ()> {
+        use Type::*;
+        match (self, ty) {
+            (&Int, &Int) => Ok(()),
+            (&Bool, &Bool) => Ok(()),
+            (&Fun(ref ty11, ref ty12), &Fun(ref ty21, ref ty22)) => {
+                ty11.is_general_aux(n, s, ty21)?;
+                ty12.is_general_aux(n, s, ty22)?;
+                Ok(())
+            }
+            (&Int, _) | (&Bool, _) | (&Fun(..), _) => Err(()),
+            (&Var(V(i)), _) if i >= n => {
+                if self == ty {
+                    Ok(())
+                } else {
+                    Err(())
+                }
+            }
+            (&Var(v), _) => {
+                let ty0 = v.apply_subst(s);
+                if &ty0 == self {
+                    s.0.insert(v, ty.clone());
+                    Ok(())
+                } else {
+                    ty0.is_general_aux(n, s, ty)
+                }
+            }
+            _ => unimplemented!(),
+        }
+    }
+
+    pub fn is_general(&self, ty: &Type) -> Result<Subst, ()> {
+        let (m, mut ty1) = self.split_universal_quantifiers();
+        let (n, mut ty2) = ty.split_universal_quantifiers();
+        ty2.shift(isize::try_from(m).unwrap());
+        ty1.shift_above(m, isize::try_from(n).unwrap());
+        let mut s = Subst::default();
+        ty1.is_general_aux(m, &mut s, &ty2)?;
+        Ok(s)
+    }
 }
 
 impl Term {
