@@ -1033,10 +1033,6 @@ impl Elaboration for Binding {
                 t.shift(isize::try_from(ks.len()).unwrap());
                 t.apply(&s1);
                 Ok((
-                    // ITerm::abs_env(
-                    //     env,
-                    //     ITerm::record(vec![(Label::from(id), ITerm::poly(ks, t))]),
-                    // ),
                     ITerm::pack(
                         ITerm::record(Some((
                             id.into(),
@@ -1094,18 +1090,19 @@ impl Elaboration for Binding {
                                 ITerm::record(vec![(
                                     Label::from(id),
                                     ITerm::app_env_purity(
-                                        ITerm::var(env.venv_abs_len_purity(p)),
+                                        ITerm::var(env.venv_len_purity(p)),
                                         &*env,
                                         p,
                                     ),
                                 )]),
                             ),
                             (0..asig.0.qs.len()).map(IType::var).collect(),
+                            // TODO: Is this `rev` correct?
                             asig.0.qs.iter().map(|p| p.0.clone()).rev(),
                             IType::forall_env_purity(
                                 env,
                                 p,
-                                IType::record(Some((Label::from(id), asig.0.body.clone().into()))),
+                                IType::record(Some((id.into(), asig.0.body.clone().into()))),
                             ),
                         ),
                     ),
@@ -1119,13 +1116,10 @@ impl Elaboration for Binding {
                 Ok((
                     ITerm::abs_env(
                         env,
-                        ITerm::record(Some((
-                            Label::from(id),
-                            SemanticTerm::Sig(asig.clone()).into(),
-                        ))),
+                        ITerm::record(Some((id.into(), SemanticTerm::Sig(asig.clone()).into()))),
                     ),
                     Existential::from(HashMap::from_iter(Some((
-                        Label::from(id),
+                        id.into(),
                         SemanticSig::AtomicSig(Box::new(asig)),
                     )))),
                     s,
@@ -1220,7 +1214,7 @@ impl Elaboration for Module {
                                                     ITerm::var(
                                                         z0 - i0
                                                             + j
-                                                            + ea.venv_abs_len_purity(p.join(p0)),
+                                                            + ea.venv_len_purity(p.join(p0)),
                                                     ),
                                                     ea.clone(),
                                                     p0,
@@ -1281,16 +1275,16 @@ impl Elaboration for Module {
                                                                 z - i0
                                                                     + j
                                                                     + env
-                                                                        .venv_abs_len_purity(p_all),
+                                                                        .venv_len_purity(p_all),
                                                             )
                                                         } else {
-                                                            (0..(d0 + env.venv_abs_len_purity(Pure))).rfold(
+                                                            (0..(d0 + env.venv_len_purity(Pure))).rfold(
                                                             (1..=qs_count0).fold(
                                                             (0..env.tenv_len()).rfold(
                                                                 ITerm::var(
                                                                     z - i0
                                                                         + j
-                                                                        + env.venv_abs_len_purity(
+                                                                        + env.venv_len_purity(
                                                                             p_all,
                                                                         ),
                                                                 ),
@@ -1308,7 +1302,7 @@ impl Elaboration for Module {
                                                                 z - i0
                                                                     + j
                                                                     + env
-                                                                        .venv_abs_len_purity(p_all),
+                                                                        .venv_len_purity(p_all),
                                                             ),
                                                             ea_last.clone(),
                                                             p0,
@@ -1366,7 +1360,7 @@ impl Elaboration for Module {
                                 p,
                                 ITerm::proj(
                                     ITerm::app_env_purity(
-                                        ITerm::var(env.venv_abs_len_purity(p)),
+                                        ITerm::var(env.venv_len_purity(p)),
                                         &*env,
                                         p,
                                     ),
@@ -1375,7 +1369,7 @@ impl Elaboration for Module {
                             ),
                             (0..asig.0.qs.len()).map(IType::var).collect(),
                             asig.0.qs.iter().map(|p| p.0.clone()),
-                            asig0.0.body.clone().into(),
+                            IType::forall_env_purity(&*env, p, asig0.0.body.clone().into()),
                         ),
                     ),
                     asig0,
@@ -1397,14 +1391,13 @@ impl Elaboration for Module {
                     body.apply(&s0);
                 }
                 Ok((
-                    //TODO: the 4th argument to `ITerm::pack` should perhaps be changed.
                     ITerm::pack(
                         ITerm::abs_env(&*env, ITerm::app(t, ITerm::Var(v))),
                         tys.into_iter()
                             .map(|ty| IType::abs_env(&*env, ty))
                             .collect(),
                         asig.0.qs.iter().map(|p| p.0.clone()),
-                        asig.0.body.clone().into(),
+                        IType::forall_env(&*env, asig.0.body.clone().into()),
                     ),
                     Existential(Quantified { qs, body }),
                     s,
@@ -1514,7 +1507,7 @@ impl Elaboration for Path {
 
     fn elaborate(&self, env: &mut Env) -> Result<Self::Output, Self::Error> {
         let (t, asig, s, p) = self.0.elaborate(env)?;
-        // Need shift?
+        // TODO: Need shift?
         IType::from(asig.0.body.clone())
             .kind_of(env)
             .map_err(TypeError::KindError)?
@@ -1929,6 +1922,7 @@ impl Expr {
                             t2,
                             asig0.0.qs.len(),
                             ITerm::pack(
+                                // TODO: Perhaps need shift by `asig0.0.qs.len()`.
                                 ITerm::app_env_purity(ITerm::var(0), env, p),
                                 (0..asig0.0.qs.len()).map(IType::var).collect(),
                                 asig.0.qs.iter().map(|p| p.0.clone()),

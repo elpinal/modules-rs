@@ -1867,9 +1867,9 @@ impl<T, S> Env<T, S> {
         self.tenv.len()
     }
 
-    pub fn venv_abs_len_purity(&self, p: Purity) -> usize {
+    pub fn venv_len_purity(&self, p: Purity) -> usize {
         if p.is_pure() {
-            self.venv.iter().filter(|x| x.is_some()).count()
+            self.venv.len()
         } else {
             0
         }
@@ -2060,9 +2060,9 @@ impl<T, S> Env<T, S> {
 }
 
 impl<T, S> EnvAbs<T, S> {
-    pub fn venv_abs_len_purity(&self, p: Purity) -> usize {
+    pub fn venv_len_purity(&self, p: Purity) -> usize {
         if p.is_pure() {
-            self.venv.iter().filter(|x| x.is_some()).count()
+            self.venv.len()
         } else {
             0
         }
