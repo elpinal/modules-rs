@@ -36,4 +36,15 @@ fn test_execution() {
            val c = 1
          end"
     );
+
+    assert_exec!(
+        "struct
+           val x = 20
+
+           module W = struct
+             val y = 40
+             val f = λa.a
+           end
+         end"
+    );
 }

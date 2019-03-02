@@ -164,7 +164,7 @@ struct BindingInformation {
     w: Vec<ITerm>,
 }
 
-type Memory<T, S> = Vec<(EnvAbs<T, S>, Purity, Vec<Label>, usize, usize, usize)>;
+type Memory<T, S> = Vec<(EnvAbs<T, S>, Purity, Vec<Label>, usize, usize, usize, usize)>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Purity {
@@ -1178,6 +1178,7 @@ impl Elaboration for Module {
                         z,
                         qs_count,
                         d,
+                        z0,
                     ));
                     qs_count += len;
                     n += if len == 0 { 1 } else { len };
@@ -1203,7 +1204,7 @@ impl Elaboration for Module {
                     let t = ITerm::let_in(
                         memory[..i]
                             .iter()
-                            .flat_map(|&(ref ea, p0, ref ls, i0, _, _)| {
+                            .flat_map(|&(ref ea, p0, ref ls, i0, _, _, _)| {
                                 ls.iter()
                                     .map(|l| {
                                         let ret = ITerm::abs_env_purity(
@@ -1258,34 +1259,38 @@ impl Elaboration for Module {
                 let mut j = 0;
                 let t = v.into_iter().rfold(
                     ITerm::pack(
-                        ITerm::abs_env_purity(
+                        ITerm::abs_env_purity_ignore_dummy_values(
                             &*env,
                             p_all,
                             ITerm::let_in(
                                 memory
                                     .iter()
-                                    .flat_map(|&(ref ea, p0, ref ls, i0, qs_count0, d0)| {
+                                    .flat_map(|&(_, p0, ref ls, i0, qs_count0, d0, z0)| {
+                                        dbg!(ls);
                                         ls.iter()
                                             .enumerate()
                                             .map(|(q, l)| {
+                                                dbg!(l);
                                                 let ret = ITerm::proj(
                                                     if p_all.is_pure() {
                                                         if p0.is_impure() {
                                                             ITerm::var(
                                                                 z - i0
                                                                     + j
-                                                                    + env.venv_len_purity(p_all),
+                                                                    + env.venv_abs_len_purity(p_all),
                                                             )
                                                         } else {
+                                                            (0..d0).rfold(
+                                                            (0..dbg!(z0)).rfold(
                                                             ITerm::app_env_seq(
                                                             (1..=qs_count0).fold(
                                                                 (0..env.tenv_len()).rfold(
                                                                     ITerm::var(
-                                                                        z - i0
-                                                                            + j
-                                                                            + env.venv_len_purity(
+                                                                        dbg!(z) - dbg!(i0)
+                                                                            + dbg!(j)
+                                                                            + dbg!(env.venv_abs_len_purity(
                                                                                 p_all,
-                                                                            ),
+                                                                            )),
                                                                     ),
                                                                     |acc, i| {
                                                                         ITerm::inst(
@@ -1304,17 +1309,17 @@ impl Elaboration for Module {
                                                                     )
                                                                 },
                                                             ),
-                                                            ea.clone(),
-                                                            0,
-                                                            q,
-                                                            )
+                                                            &*env, 0, j),
+                                                            |acc, _| ITerm::app(acc, ITerm::trivial())),
+                                                            |acc, i| ITerm::app(acc, dbg!(ITerm::var(i + q))))
                                                         }
                                                     } else {
+                                                        // TODO: need investigation.
                                                         ITerm::app_env_purity_skip(
                                                             ITerm::var(
                                                                 z - i0
                                                                     + j
-                                                                    + env.venv_len_purity(p_all),
+                                                                    + env.venv_abs_len_purity(p_all),
                                                             ),
                                                             ea_last.clone(),
                                                             p0,
@@ -1336,7 +1341,7 @@ impl Elaboration for Module {
                         ),
                         (0..qs.len()).map(IType::var).collect(),
                         qs.iter().map(|p| p.0.clone()).rev(),
-                        IType::forall_env_purity(
+                        IType::forall_env_purity_ignore_dummy_values(
                             env,
                             p_all,
                             SemanticSig::StructureSig(body.clone()).into(),

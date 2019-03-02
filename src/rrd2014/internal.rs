@@ -838,6 +838,25 @@ impl Type {
         }
     }
 
+    pub fn forall_env_purity_ignore_dummy_values<T, S>(env: &Env<T, S>, p: Purity, ty: Type) -> Self
+    where
+        T: Clone + Into<Type>,
+    {
+        if p.is_impure() {
+            return ty;
+        }
+        let ty = env.venv.iter().rfold(ty, |acc, ty| {
+            if let Some(ref ty) = *ty {
+                Type::fun(ty.clone().into(), acc)
+            } else {
+                acc
+            }
+        });
+        env.tenv
+            .iter()
+            .rfold(ty, |acc, p| Type::forall(Some(p.0.clone()), acc))
+    }
+
     pub fn must_be_int(&self) -> Result<(), TypeError> {
         if let Type::Int = *self {
             Ok(())
@@ -1314,7 +1333,28 @@ impl Term {
         }
     }
 
-    fn trivial() -> Self {
+    pub fn abs_env_purity_ignore_dummy_values<U, T, S>(env: U, p: Purity, t: Term) -> Self
+    where
+        U: Into<EnvAbs<T, S>>,
+        T: Clone + Into<Type>,
+    {
+        if p.is_impure() {
+            return t;
+        }
+        let env = env.into();
+        let t = env.venv.iter().rfold(t, |acc, ty| {
+            if let Some(ref ty) = *ty {
+                Term::abs(ty.clone().into(), acc)
+            } else {
+                acc
+            }
+        });
+        env.tenv
+            .iter()
+            .rfold(t, |acc, p| Term::poly(Some(p.0.clone()), acc))
+    }
+
+    pub fn trivial() -> Self {
         Term::record(None)
     }
 
@@ -1375,19 +1415,16 @@ impl Term {
     where
         U: Into<EnvAbs<T, S>>,
     {
-        env.into()
-            .venv
-            .iter()
-            .rev()
-            .skip(vskip)
-            .enumerate()
-            .rfold(t, |acc, (i, ty)| {
-                if ty.is_some() {
-                    Term::app(acc, Term::var(i + vn))
-                } else {
-                    Term::app(acc, Term::trivial())
-                }
-            })
+        let env = env.into();
+        let mut j = env.venv_abs_len_purity(Purity::Pure);
+        env.venv.iter().rev().skip(vskip).rfold(t, |acc, ty| {
+            if ty.is_some() {
+                j -= 1;
+                Term::app(acc, Term::var(j + vn))
+            } else {
+                Term::app(acc, Term::trivial())
+            }
+        })
     }
 
     /// Creates a successive projection.
@@ -1894,6 +1931,14 @@ impl<T, S> Env<T, S> {
         }
     }
 
+    pub fn venv_abs_len_purity(&self, p: Purity) -> usize {
+        if p.is_pure() {
+            self.venv.iter().filter(|x| x.is_some()).count()
+        } else {
+            0
+        }
+    }
+
     pub fn lookup_type(&self, v: Variable) -> Result<(Kind, S), EnvError>
     where
         S: Clone + Default,
@@ -2082,6 +2127,14 @@ impl<T, S> EnvAbs<T, S> {
     pub fn venv_len_purity(&self, p: Purity) -> usize {
         if p.is_pure() {
             self.venv.len()
+        } else {
+            0
+        }
+    }
+
+    pub fn venv_abs_len_purity(&self, p: Purity) -> usize {
+        if p.is_pure() {
+            self.venv.iter().filter(|x| x.is_some()).count()
         } else {
             0
         }
