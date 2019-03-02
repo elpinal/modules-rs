@@ -1416,15 +1416,18 @@ impl Term {
         U: Into<EnvAbs<T, S>>,
     {
         let env = env.into();
-        let mut j = env.venv_abs_len_purity(Purity::Pure);
-        env.venv.iter().rev().skip(vskip).rfold(t, |acc, ty| {
-            if ty.is_some() {
-                j -= 1;
-                Term::app(acc, Term::var(j + vn))
-            } else {
-                Term::app(acc, Term::trivial())
-            }
-        })
+        env.venv
+            .iter()
+            .rev()
+            .skip(vskip)
+            .enumerate()
+            .rfold(t, |acc, (j, ty)| {
+                if ty.is_some() {
+                    Term::app(acc, Term::var(j + vn))
+                } else {
+                    Term::app(acc, Term::trivial())
+                }
+            })
     }
 
     /// Creates a successive projection.

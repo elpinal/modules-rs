@@ -1259,7 +1259,7 @@ impl Elaboration for Module {
                 let mut j = 0;
                 let t = v.into_iter().rfold(
                     ITerm::pack(
-                        ITerm::abs_env_purity_ignore_dummy_values(
+                        ITerm::abs_env_purity(
                             &*env,
                             p_all,
                             ITerm::let_in(
@@ -1277,7 +1277,7 @@ impl Elaboration for Module {
                                                             ITerm::var(
                                                                 z - i0
                                                                     + j
-                                                                    + env.venv_abs_len_purity(p_all),
+                                                                    + env.venv_len_purity(p_all),
                                                             )
                                                         } else {
                                                             (0..d0).rfold(
@@ -1288,7 +1288,7 @@ impl Elaboration for Module {
                                                                     ITerm::var(
                                                                         dbg!(z) - dbg!(i0)
                                                                             + dbg!(j)
-                                                                            + dbg!(env.venv_abs_len_purity(
+                                                                            + dbg!(env.venv_len_purity(
                                                                                 p_all,
                                                                             )),
                                                                     ),
@@ -1319,7 +1319,7 @@ impl Elaboration for Module {
                                                             ITerm::var(
                                                                 z - i0
                                                                     + j
-                                                                    + env.venv_abs_len_purity(p_all),
+                                                                    + env.venv_len_purity(p_all),
                                                             ),
                                                             ea_last.clone(),
                                                             p0,
@@ -1341,7 +1341,7 @@ impl Elaboration for Module {
                         ),
                         (0..qs.len()).map(IType::var).collect(),
                         qs.iter().map(|p| p.0.clone()).rev(),
-                        IType::forall_env_purity_ignore_dummy_values(
+                        IType::forall_env_purity(
                             env,
                             p_all,
                             SemanticSig::StructureSig(body.clone()).into(),
