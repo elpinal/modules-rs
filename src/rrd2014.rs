@@ -1108,9 +1108,10 @@ impl Elaboration for Binding {
                             (0..asig.0.qs.len()).map(IType::var).collect(),
                             // TODO: Is this `rev` correct?
                             asig.0.qs.iter().map(|p| p.0.clone()).rev(),
-                            IType::forall_env_purity(
+                            IType::forall_env_purity_swap(
                                 env,
                                 p,
+                                asig.0.qs.len(),
                                 IType::record(Some((id.into(), asig.0.body.clone().into()))),
                             ),
                         ),
@@ -1266,6 +1267,18 @@ impl Elaboration for Module {
                     .collect();
                 let p_all = memory.iter().fold(Pure, |acc, entry| acc.join(entry.1));
                 let mut j = 0;
+                let body0 = {
+                    let mut body0 = body.clone();
+                    if p_all.is_pure() {
+                        let s = Subst::from_iter(
+                            (0..qs_count)
+                                .map(|i| (V(i), IType::var(i + qs_count + env.tenv_len()))),
+                        );
+                        body0.apply(&s);
+                        body0.shift(-isize::try_from(qs_count).unwrap());
+                    }
+                    body0
+                };
                 let t = v.into_iter().rfold(
                     ITerm::pack(
                         ITerm::abs_env_purity(
@@ -1351,7 +1364,7 @@ impl Elaboration for Module {
                         IType::forall_env_purity(
                             env,
                             p_all,
-                            SemanticSig::StructureSig(body.clone()).into(),
+                            SemanticSig::StructureSig(body0).into(),
                         ),
                     ),
                     |t0, BindingInformation { t, n, .. }| ITerm::unpack(t, n, t0),
@@ -1393,7 +1406,12 @@ impl Elaboration for Module {
                             ),
                             (0..asig.0.qs.len()).map(IType::var).collect(),
                             asig.0.qs.iter().map(|p| p.0.clone()),
-                            IType::forall_env_purity(&*env, p, asig0.0.body.clone().into()),
+                            IType::forall_env_purity_swap(
+                                &*env,
+                                p,
+                                asig0.0.qs.len(),
+                                asig0.0.body.clone().into(),
+                            ),
                         ),
                     ),
                     asig0,
@@ -1421,7 +1439,12 @@ impl Elaboration for Module {
                             .map(|ty| IType::abs_env(&*env, ty))
                             .collect(),
                         asig.0.qs.iter().map(|p| IKind::fun_env(&*env, p.0.clone())),
-                        IType::forall_env(&*env, asig.0.body.clone().into()),
+                        IType::forall_env_purity_swap(
+                            &*env,
+                            Pure,
+                            asig.0.qs.len(),
+                            body.clone().into(),
+                        ),
                     ),
                     Existential(Quantified { qs, body }),
                     s,

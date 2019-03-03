@@ -844,6 +844,20 @@ impl Type {
         }
     }
 
+    pub fn forall_env_purity_swap<T, S>(env: &Env<T, S>, p: Purity, n: usize, mut ty: Type) -> Self
+    where
+        T: Clone + Into<Type>,
+    {
+        if p.is_pure() {
+            let s = Subst::from_iter((0..n).map(|i| (V(i), Type::var(i + n + env.tenv_len()))));
+            ty.apply(&s);
+            ty.shift(-isize::try_from(n).unwrap());
+            Type::forall_env(env, ty)
+        } else {
+            ty
+        }
+    }
+
     pub fn forall_env_purity_ignore_dummy_values<T, S>(env: &Env<T, S>, p: Purity, ty: Type) -> Self
     where
         T: Clone + Into<Type>,
@@ -1277,7 +1291,11 @@ impl Type {
         Ok((
             (0..m)
                 .rev()
-                .map(|i| s.0.remove(&V(i)).expect("unexpected error"))
+                .map(|i| {
+                    let mut ty = s.0.remove(&V(i)).expect("unexpected error");
+                    ty.shift(-isize::try_from(m).unwrap());
+                    ty
+                })
                 .collect(),
             v,
         ))
