@@ -17,6 +17,15 @@ pub fn exec<I>(src: I) -> Fallible<()>
 where
     I: IntoIterator<Item = char>,
 {
+    let t = typecheck(src)?;
+    let _ = dynamic::reduce(t)?;
+    Ok(())
+}
+
+pub fn typecheck<I>(src: I) -> Fallible<internal::Term>
+where
+    I: IntoIterator<Item = char>,
+{
     let m = parser::parse(src)?;
     let (t, asig, gtenv) = rrd2014::elaborate(m)?;
     let ty = internal::typecheck(&t, gtenv)?;
@@ -24,6 +33,5 @@ where
     if !ty.equal(&expected) {
         bail!("invariant violation");
     }
-    let _ = dynamic::reduce(t)?;
-    Ok(())
+    Ok(t)
 }
