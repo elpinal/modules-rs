@@ -2482,6 +2482,53 @@ mod tests {
                 ),
             )
         );
+
+        assert_eq!(
+            Term::pack(
+                Term::Int(1),
+                vec![Type::var(0), Type::var(1), Type::var(2)],
+                vec![Mono, Mono, Mono],
+                Type::record(vec![
+                    (label("a"), Type::var(2)),
+                    (label("b"), Type::var(1)),
+                    (label("c"), Type::var(0)),
+                ])
+            ),
+            Term::Pack(
+                Type::var(2),
+                Box::new(Term::Pack(
+                    Type::var(1),
+                    Box::new(Term::Pack(
+                        Type::var(0),
+                        Box::new(Term::Int(1)),
+                        Type::some(
+                            vec![Mono],
+                            Type::record(vec![
+                                (label("a"), Type::var(3)),
+                                (label("b"), Type::var(2)),
+                                (label("c"), Type::var(0)),
+                            ])
+                        ),
+                    )),
+                    Type::some(
+                        vec![Mono, Mono],
+                        Type::record(vec![
+                            (label("a"), Type::var(4)),
+                            (label("b"), Type::var(1)),
+                            (label("c"), Type::var(0)),
+                        ])
+                    ),
+                )),
+                Type::some(
+                    vec![Mono, Mono, Mono],
+                    Type::record(vec![
+                        (label("a"), Type::var(2)),
+                        (label("b"), Type::var(1)),
+                        (label("c"), Type::var(0)),
+                    ])
+                ),
+            )
+        );
     }
 
     #[test]
