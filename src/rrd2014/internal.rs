@@ -144,6 +144,12 @@ pub enum KindError {
 
     #[fail(display = "environment error: {}", _0)]
     Env(EnvError),
+
+    #[fail(display = "function's domain type {:?}: {}", _0, _1)]
+    Domain(Type, NotMonoError),
+
+    #[fail(display = "function's codomain type {:?}: {}", _0, _1)]
+    Codomain(Type, NotMonoError),
 }
 
 #[derive(Debug, Fail, PartialEq)]
@@ -1119,9 +1125,10 @@ impl Type {
             Var(v) => Ok(env.lookup_type(v).map_err(KindError::Env)?.0),
             Fun(ref ty1, ref ty2) => {
                 let k1 = ty1.kind_of(env)?;
-                k1.mono().map_err(|e| KindError::NotMono(*ty1.clone(), e))?;
+                k1.mono().map_err(|e| KindError::Domain(*ty1.clone(), e))?;
                 let k2 = ty2.kind_of(env)?;
-                k2.mono().map_err(|e| KindError::NotMono(*ty2.clone(), e))?;
+                k2.mono()
+                    .map_err(|e| KindError::Codomain(*ty2.clone(), e))?;
                 Ok(Mono)
             }
             Record(ref r) => {
@@ -2662,7 +2669,7 @@ mod tests {
         );
         assert_kinding_err!(
             Type::fun(Int, Type::abs(vec![Mono], Int)),
-            KindError::NotMono(
+            KindError::Codomain(
                 Type::abs(vec![Mono], Int),
                 NotMonoError(Kind::fun(Mono, Mono))
             )
