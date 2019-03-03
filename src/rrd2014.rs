@@ -777,8 +777,9 @@ impl Elaboration for Decl {
         };
         match *self {
             Val(ref id, ref ty) => {
-                let (ty, k, s) = ty.elaborate(env)?;
+                let (mut ty, k, s) = ty.elaborate(env)?;
                 k.mono().map_err(TypeError::NotMono)?;
+                ty.shift(1);
                 Ok((
                     Existential(Quantified {
                         qs: vec![(IKind::Mono, id.into())],
@@ -979,7 +980,8 @@ impl Elaboration for Binding {
                         ));
                     }
                     _ if e.is_pure() => {
-                        let (mut t, ty, s) = e.elaborate(env)?;
+                        let (mut t, mut ty, s) = e.elaborate(env)?;
+                        ty.shift(1);
                         let (scheme, s1, ks) = ty.close(env);
                         t.shift(isize::try_from(ks.len()).unwrap());
                         t.apply(&s1);
@@ -1034,10 +1036,11 @@ impl Elaboration for Binding {
                     _ => (),
                 }
                 let (t, ty, s) = e.elaborate(env)?;
-                let (scheme, s1, ks) = ty.close(env);
+                let (mut scheme, s1, ks) = ty.close(env);
                 let mut t = ITerm::from(SemanticTerm::Term(t));
                 t.shift(isize::try_from(ks.len()).unwrap());
                 t.apply(&s1);
+                scheme.shift(1);
                 Ok((
                     ITerm::pack(
                         ITerm::record(Some((
