@@ -2577,12 +2577,13 @@ mod tests {
 
     #[test]
     fn encoding() {
+        use crate::rrd2014::SemanticSig;
         use crate::rrd2014::SemanticSig::*;
         use Kind::*;
         use Type::*;
 
-        assert_encoding!(AtomicTerm(Int), Int);
-        assert_encoding!(AtomicTerm(Type::var(0)), Type::var(0));
+        assert_encoding!(SemanticSig::default_atomic_term(Int), Int);
+        assert_encoding!(SemanticSig::default_atomic_term(Type::var(0)), Type::var(0));
 
         assert_encoding!(
             AtomicType(Int, Mono),
