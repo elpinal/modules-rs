@@ -1266,11 +1266,9 @@ impl Elaboration for Module {
                                 memory
                                     .iter()
                                     .flat_map(|&(_, p0, ref ls, i0, qs_count0, d0, z0)| {
-                                        dbg!(ls);
                                         ls.iter()
                                             .enumerate()
                                             .map(|(q, l)| {
-                                                dbg!(l);
                                                 let ret = ITerm::proj(
                                                     if p_all.is_pure() {
                                                         if p0.is_impure() {
@@ -1281,16 +1279,16 @@ impl Elaboration for Module {
                                                             )
                                                         } else {
                                                             (0..d0).rfold(
-                                                            (0..dbg!(z0)).rfold(
+                                                            (0..z0).rfold(
                                                             ITerm::app_env_seq(
                                                             (1..=qs_count0).fold(
                                                                 (0..env.tenv_len()).rfold(
                                                                     ITerm::var(
-                                                                        dbg!(z) - dbg!(i0)
-                                                                            + dbg!(j)
-                                                                            + dbg!(env.venv_len_purity(
+                                                                        z - i0
+                                                                            + j
+                                                                            + env.venv_len_purity(
                                                                                 p_all,
-                                                                            )),
+                                                                            ),
                                                                     ),
                                                                     |acc, i| {
                                                                         ITerm::inst(
@@ -1311,7 +1309,7 @@ impl Elaboration for Module {
                                                             ),
                                                             &*env, 0, j),
                                                             |acc, _| ITerm::app(acc, ITerm::trivial())),
-                                                            |acc, i| ITerm::app(acc, dbg!(ITerm::var(i + q))))
+                                                            |acc, i| ITerm::app(acc, ITerm::var(i + q)))
                                                         }
                                                     } else {
                                                         // TODO: need investigation.
