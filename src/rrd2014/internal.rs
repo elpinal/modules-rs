@@ -11,6 +11,7 @@ use std::iter::FromIterator;
 use failure::Fail;
 
 use super::BinOp;
+use super::Purity;
 
 pub mod dynamic;
 
@@ -105,11 +106,20 @@ pub struct Env<T, S> {
     /// A name-to-index map.
     nmap: HashMap<Name, usize>,
 
-    /// A counter.
+    /// A counter to generate fresh type variables for type inference.
     n: usize,
 }
 
 pub struct EnvState(HashMap<Name, usize>);
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EnvAbs<T, S> {
+    /// A type environment.
+    /// Variable 0 denotes the last introduced type variable.
+    tenv: Vec<(Kind, S)>,
+
+    venv: Vec<Option<T>>,
+}
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Context<'a> {
@@ -134,6 +144,12 @@ pub enum KindError {
 
     #[fail(display = "environment error: {}", _0)]
     Env(EnvError),
+
+    #[fail(display = "function's domain type {:?}: {}", _0, _1)]
+    Domain(Type, NotMonoError),
+
+    #[fail(display = "function's codomain type {:?}: {}", _0, _1)]
+    Codomain(Type, NotMonoError),
 }
 
 #[derive(Debug, Fail, PartialEq)]
@@ -170,6 +186,12 @@ pub enum TypeError {
 
     #[fail(display = "in application of {:?} to {:?}: {}", _0, _1, _2)]
     Application(Box<Term>, Box<Term>, Box<TypeError>),
+
+    #[fail(display = "in packing [{:?}, {:?}] as {:?}: {}", _0, _1, _2, _3)]
+    Pack(Box<Type>, Box<Term>, Box<Type>, Box<TypeError>),
+
+    #[fail(display = "instantiation of {:?} with {:?}: {}", _0, _1, _2)]
+    Inst(Box<Term>, Type, KindError),
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -214,6 +236,16 @@ impl Shift for Type {
             }
         };
         self.map(&f, c)
+    }
+}
+
+impl Shift for Variable {
+    fn shift_above(&mut self, c: usize, d: isize) {
+        if let V(ref mut n) = *self {
+            if c <= *n {
+                *n = usize::try_from(isize::try_from(*n).unwrap() + d).unwrap();
+            }
+        }
     }
 }
 
@@ -450,6 +482,16 @@ impl Fgtv for Kind {
     }
 }
 
+impl Fgtv for Variable {
+    fn fgtv(&self) -> HashSet<usize> {
+        if let Variable::Generated(n) = *self {
+            HashSet::from_iter(Some(n))
+        } else {
+            HashSet::new()
+        }
+    }
+}
+
 impl Fgtv for Type {
     fn fgtv(&self) -> HashSet<usize> {
         use Type::*;
@@ -508,7 +550,7 @@ impl From<super::SemanticSig> for Type {
     fn from(st: super::SemanticSig) -> Self {
         use super::SemanticSig::*;
         match st {
-            AtomicTerm(ty) => ty,
+            AtomicTerm(_, ty) => ty,
             AtomicType(mut ty, k) => {
                 ty.shift(1);
                 Type::forall(
@@ -529,6 +571,7 @@ impl From<super::SemanticSig> for Type {
                     .collect(),
             ),
             FunctorSig(u) => u.into(),
+            Applicative(u) => u.into(),
         }
     }
 }
@@ -536,7 +579,7 @@ impl From<super::SemanticSig> for Type {
 impl<T: Into<Type>> From<super::Existential<T>> for Type {
     fn from(ex: super::Existential<T>) -> Self {
         Type::some(
-            ex.0.qs.into_iter().map(|p| p.0).collect::<Vec<_>>(),
+            ex.0.qs.into_iter().rev().map(|p| p.0).collect::<Vec<_>>(),
             ex.0.body.into(),
         )
     }
@@ -545,7 +588,7 @@ impl<T: Into<Type>> From<super::Existential<T>> for Type {
 impl<T: Into<Type>> From<super::Universal<T>> for Type {
     fn from(u: super::Universal<T>) -> Self {
         Type::forall(
-            u.0.qs.into_iter().map(|p| p.0).collect::<Vec<_>>(),
+            u.0.qs.into_iter().rev().map(|p| p.0).collect::<Vec<_>>(),
             u.0.body.into(),
         )
     }
@@ -553,6 +596,12 @@ impl<T: Into<Type>> From<super::Universal<T>> for Type {
 
 impl From<super::Fun> for Type {
     fn from(f: super::Fun) -> Self {
+        Type::fun(f.0.into(), f.1.into())
+    }
+}
+
+impl From<super::Applicative> for Type {
+    fn from(f: super::Applicative) -> Self {
         Type::fun(f.0.into(), f.1.into())
     }
 }
@@ -663,6 +712,14 @@ impl Variable {
             Variable::Generated(n) => panic!("get_index: unexpected generated variable: {}", n),
         }
     }
+
+    pub fn apply_subst(self, s: &Subst) -> Type {
+        if let Option::Some(ty) = s.0.get(&self) {
+            ty.clone()
+        } else {
+            Type::Var(self)
+        }
+    }
 }
 
 impl FromIterator<(Variable, Type)> for Subst {
@@ -717,6 +774,12 @@ impl Kind {
     pub fn equal(&self, k: &Kind) -> bool {
         self == k
     }
+
+    pub fn fun_env<T, S>(env: &Env<T, S>, k: Kind) -> Self {
+        env.tenv
+            .iter()
+            .rfold(k, |acc, p| Kind::fun(p.0.clone(), acc))
+    }
 }
 
 impl Type {
@@ -738,6 +801,80 @@ impl Type {
 
     pub fn record<I: IntoIterator<Item = (Label, Type)>>(iter: I) -> Self {
         Type::Record(Record::from_iter(iter))
+    }
+
+    pub fn abs_env<T, S>(env: &Env<T, S>, ty: Type) -> Self {
+        env.tenv
+            .iter()
+            .rfold(ty, |acc, p| Type::abs(Some(p.0.clone()), acc))
+    }
+
+    pub fn app_env<T, S>(ty: Type, env: &Env<T, S>) -> Self {
+        (0..env.tenv.len()).rfold(ty, |acc, n| Type::app(acc, Type::var(n)))
+    }
+
+    fn trivial() -> Self {
+        Type::record(None)
+    }
+
+    pub fn forall_env<T, S>(env: &Env<T, S>, ty: Type) -> Self
+    where
+        T: Clone + Into<Type>,
+    {
+        let ty = env.venv.iter().rfold(ty, |acc, ty| {
+            if let Some(ref ty) = *ty {
+                Type::fun(ty.clone().into(), acc)
+            } else {
+                Type::fun(Type::trivial(), acc)
+            }
+        });
+        env.tenv
+            .iter()
+            .rfold(ty, |acc, p| Type::forall(Some(p.0.clone()), acc))
+    }
+
+    pub fn forall_env_purity<T, S>(env: &Env<T, S>, p: Purity, ty: Type) -> Self
+    where
+        T: Clone + Into<Type>,
+    {
+        if p.is_pure() {
+            Type::forall_env(env, ty)
+        } else {
+            ty
+        }
+    }
+
+    pub fn forall_env_purity_swap<T, S>(env: &Env<T, S>, p: Purity, n: usize, mut ty: Type) -> Self
+    where
+        T: Clone + Into<Type>,
+    {
+        if p.is_pure() {
+            let s = Subst::from_iter((0..n).map(|i| (V(i), Type::var(i + n + env.tenv_len()))));
+            ty.apply(&s);
+            ty.shift(-isize::try_from(n).unwrap());
+            Type::forall_env(env, ty)
+        } else {
+            ty
+        }
+    }
+
+    pub fn forall_env_purity_ignore_dummy_values<T, S>(env: &Env<T, S>, p: Purity, ty: Type) -> Self
+    where
+        T: Clone + Into<Type>,
+    {
+        if p.is_impure() {
+            return ty;
+        }
+        let ty = env.venv.iter().rfold(ty, |acc, ty| {
+            if let Some(ref ty) = *ty {
+                Type::fun(ty.clone().into(), acc)
+            } else {
+                acc
+            }
+        });
+        env.tenv
+            .iter()
+            .rfold(ty, |acc, p| Type::forall(Some(p.0.clone()), acc))
     }
 
     pub fn must_be_int(&self) -> Result<(), TypeError> {
@@ -1002,9 +1139,10 @@ impl Type {
             Var(v) => Ok(env.lookup_type(v).map_err(KindError::Env)?.0),
             Fun(ref ty1, ref ty2) => {
                 let k1 = ty1.kind_of(env)?;
-                k1.mono().map_err(|e| KindError::NotMono(*ty1.clone(), e))?;
+                k1.mono().map_err(|e| KindError::Domain(*ty1.clone(), e))?;
                 let k2 = ty2.kind_of(env)?;
-                k2.mono().map_err(|e| KindError::NotMono(*ty2.clone(), e))?;
+                k2.mono()
+                    .map_err(|e| KindError::Codomain(*ty2.clone(), e))?;
                 Ok(Mono)
             }
             Record(ref r) => {
@@ -1092,6 +1230,76 @@ impl Type {
             }
         }
     }
+
+    fn split_universal_quantifiers(&self, v: &mut Vec<Kind>) -> Type {
+        match *self {
+            Type::Forall(ref k, ref ty) => {
+                v.push(k.clone());
+                ty.split_universal_quantifiers(v)
+            }
+            _ => self.clone(),
+        }
+    }
+
+    fn is_general_aux(&self, n: usize, s: &mut Subst, ty: &Type) -> Result<(), ()> {
+        use Type::*;
+        match (self, ty) {
+            (&Int, &Int) => Ok(()),
+            (&Bool, &Bool) => Ok(()),
+            (&Fun(ref ty11, ref ty12), &Fun(ref ty21, ref ty22)) => {
+                ty11.is_general_aux(n, s, ty21)?;
+                ty12.is_general_aux(n, s, ty22)?;
+                Ok(())
+            }
+            (&Int, _) | (&Bool, _) | (&Fun(..), _) => Err(()),
+            (&Var(Variable::Generated(_)), _) => {
+                unimplemented!();
+            }
+            (&Var(V(i)), _) if i >= n => {
+                if self == ty {
+                    Ok(())
+                } else {
+                    Err(())
+                }
+            }
+            (&Var(v), _) => {
+                let ty0 = v.apply_subst(s);
+                if &ty0 == self {
+                    s.0.insert(v, ty.clone());
+                    Ok(())
+                } else {
+                    ty0.is_general_aux(n, s, ty)
+                }
+            }
+            _ => unimplemented!(),
+        }
+    }
+
+    pub fn is_general(&self, ty: &Type) -> Result<(Vec<Type>, Vec<Kind>), ()> {
+        let (mut ty1, m) = {
+            let mut v = Vec::new();
+            let ty1 = self.split_universal_quantifiers(&mut v);
+            (ty1, v.len())
+        };
+        let mut v = Vec::new();
+        let mut ty2 = ty.split_universal_quantifiers(&mut v);
+        let n = v.len();
+        ty2.shift(isize::try_from(m).unwrap());
+        ty1.shift_above(m, isize::try_from(n).unwrap());
+        let mut s = Subst::default();
+        ty1.is_general_aux(m, &mut s, &ty2)?;
+        Ok((
+            (0..m)
+                .rev()
+                .map(|i| {
+                    let mut ty = s.0.remove(&V(i)).expect("unexpected error");
+                    ty.shift(-isize::try_from(m).unwrap());
+                    ty
+                })
+                .collect(),
+            v,
+        ))
+    }
 }
 
 impl Term {
@@ -1117,6 +1325,134 @@ impl Term {
 
     pub fn bin_op(op: BinOp, t1: Term, t2: Term) -> Self {
         Term::BinOp(op, Box::new(t1), Box::new(t2))
+    }
+
+    pub fn abs_env<U, T, S>(env: U, t: Term) -> Self
+    where
+        U: Into<EnvAbs<T, S>>,
+        T: Clone + Into<Type>,
+    {
+        let env = env.into();
+        let t = env.venv.iter().rfold(t, |acc, ty| {
+            if let Some(ref ty) = *ty {
+                Term::abs(ty.clone().into(), acc)
+            } else {
+                Term::abs(Type::trivial(), acc)
+            }
+        });
+        env.tenv
+            .iter()
+            .rfold(t, |acc, p| Term::poly(Some(p.0.clone()), acc))
+    }
+
+    pub fn abs_env_purity<U, T, S>(env: U, p: Purity, t: Term) -> Self
+    where
+        U: Into<EnvAbs<T, S>>,
+        T: Clone + Into<Type>,
+    {
+        let env = env.into();
+        if p.is_pure() {
+            Term::abs_env(env, t)
+        } else {
+            t
+        }
+    }
+
+    pub fn abs_env_purity_ignore_dummy_values<U, T, S>(env: U, p: Purity, t: Term) -> Self
+    where
+        U: Into<EnvAbs<T, S>>,
+        T: Clone + Into<Type>,
+    {
+        if p.is_impure() {
+            return t;
+        }
+        let env = env.into();
+        let t = env.venv.iter().rfold(t, |acc, ty| {
+            if let Some(ref ty) = *ty {
+                Term::abs(ty.clone().into(), acc)
+            } else {
+                acc
+            }
+        });
+        env.tenv
+            .iter()
+            .rfold(t, |acc, p| Term::poly(Some(p.0.clone()), acc))
+    }
+
+    pub fn trivial() -> Self {
+        Term::record(None)
+    }
+
+    // TODO: parameter `vn` might be unneeded.
+    fn app_env_skip<U, T, S>(t: Term, env: U, tskip: usize, vskip: usize, vn: usize) -> Self
+    where
+        U: Into<EnvAbs<T, S>>,
+    {
+        let env = env.into();
+        let t = (tskip..env.tenv.len()).rfold(t, |acc, i| Term::inst(acc, Some(Type::var(i))));
+        env.venv
+            .iter()
+            .rev()
+            .skip(vskip)
+            .enumerate()
+            .rfold(t, |acc, (i, ty)| {
+                if ty.is_some() {
+                    Term::app(acc, Term::var(i + vn))
+                } else {
+                    Term::app(acc, Term::trivial())
+                }
+            })
+    }
+
+    pub fn app_env<U, T, S>(t: Term, env: U) -> Self
+    where
+        U: Into<EnvAbs<T, S>>,
+    {
+        Term::app_env_skip(t, env, 0, 0, 0)
+    }
+
+    pub fn app_env_purity_skip<U, T, S>(
+        t: Term,
+        env: U,
+        p: Purity,
+        tskip: usize,
+        vskip: usize,
+        vn: usize,
+    ) -> Self
+    where
+        U: Into<EnvAbs<T, S>>,
+    {
+        if p.is_pure() {
+            Term::app_env_skip(t, env, tskip, vskip, vn)
+        } else {
+            t
+        }
+    }
+
+    pub fn app_env_purity<U, T, S>(t: Term, env: U, p: Purity) -> Self
+    where
+        U: Into<EnvAbs<T, S>>,
+    {
+        Term::app_env_purity_skip(t, env, p, 0, 0, 0)
+    }
+
+    pub fn app_env_seq<U, T, S>(t: Term, env: U, vskip: usize, vn: usize) -> Self
+    where
+        U: Into<EnvAbs<T, S>>,
+    {
+        let env = env.into();
+        env.venv
+            .iter()
+            .rev()
+            .skip(vskip)
+            .enumerate()
+            .rfold(t, |acc, (j, ty)| {
+                if ty.is_some() {
+                    Term::app(acc, Term::var(j + vn))
+                } else {
+                    Term::app(acc, Term::trivial())
+                }
+            })
     }
 
     /// Creates a successive projection.
@@ -1487,7 +1823,11 @@ impl Term {
                             ty.subst_top(&mut ty2.clone());
                             Ok(*ty)
                         } else {
-                            Err(TypeError::KindError(KindError::KindMismatch(k1, k2)))
+                            Err(TypeError::Inst(
+                                t.clone(),
+                                ty2.clone(),
+                                KindError::KindMismatch(k1, k2),
+                            ))
                         }
                     }
                     _ => Err(TypeError::NotForall(ty1)),
@@ -1507,7 +1847,12 @@ impl Term {
                             if ty0.equal(&ty) {
                                 Ok(ty2.clone())
                             } else {
-                                Err(TypeError::TypeMismatch(ty0, ty))
+                                Err(TypeError::Pack(
+                                    Box::new(ty1.clone()),
+                                    t.clone(),
+                                    Box::new(ty2.clone()),
+                                    Box::new(TypeError::TypeMismatch(ty0, ty)),
+                                ))
                             }
                         } else {
                             Err(TypeError::KindError(KindError::KindMismatch(
@@ -1600,6 +1945,26 @@ pub enum UnificationError {
 impl<T, S> Env<T, S> {
     pub fn get_generated_type_env(self) -> Vec<Kind> {
         self.gtenv
+    }
+
+    pub fn tenv_len(&self) -> usize {
+        self.tenv.len()
+    }
+
+    pub fn venv_len_purity(&self, p: Purity) -> usize {
+        if p.is_pure() {
+            self.venv.len()
+        } else {
+            0
+        }
+    }
+
+    pub fn venv_abs_len_purity(&self, p: Purity) -> usize {
+        if p.is_pure() {
+            self.venv.iter().filter(|x| x.is_some()).count()
+        } else {
+            0
+        }
     }
 
     pub fn lookup_type(&self, v: Variable) -> Result<(Kind, S), EnvError>
@@ -1708,6 +2073,22 @@ impl<T, S> Env<T, S> {
         }
     }
 
+    fn insert_dummy_value_at(&mut self, v: Variable) {
+        let n = self.venv.len() - v.get_index();
+        self.venv.insert(n, None);
+        self.nmap.values_mut().for_each(|i| {
+            if *i >= n {
+                *i += 1;
+            }
+        })
+    }
+
+    pub fn insert_dummy_values_at(&mut self, v: Variable, n: usize) {
+        for _ in 0..n {
+            self.insert_dummy_value_at(v);
+        }
+    }
+
     pub fn drop_values_state(&mut self, n: usize, state: EnvState) {
         self.venv.truncate(self.venv.len() - n);
         self.nmap = state.0;
@@ -1767,6 +2148,42 @@ impl<T, S> Env<T, S> {
         let n = self.n;
         self.n += 1;
         Variable::Generated(n)
+    }
+}
+
+impl<T, S> EnvAbs<T, S> {
+    pub fn venv_len_purity(&self, p: Purity) -> usize {
+        if p.is_pure() {
+            self.venv.len()
+        } else {
+            0
+        }
+    }
+
+    pub fn venv_abs_len_purity(&self, p: Purity) -> usize {
+        if p.is_pure() {
+            self.venv.iter().filter(|x| x.is_some()).count()
+        } else {
+            0
+        }
+    }
+}
+
+impl<'a, T: Clone, S: Clone> From<&'a Env<T, S>> for EnvAbs<T, S> {
+    fn from(env: &'a Env<T, S>) -> EnvAbs<T, S> {
+        EnvAbs {
+            tenv: env.tenv.clone(),
+            venv: env.venv.clone(),
+        }
+    }
+}
+
+impl<'a, T: Clone, S: Clone> From<&'a mut Env<T, S>> for EnvAbs<T, S> {
+    fn from(env: &'a mut Env<T, S>) -> EnvAbs<T, S> {
+        EnvAbs {
+            tenv: env.tenv.clone(),
+            venv: env.venv.clone(),
+        }
     }
 }
 
@@ -2083,6 +2500,53 @@ mod tests {
                 ),
             )
         );
+
+        assert_eq!(
+            Term::pack(
+                Term::Int(1),
+                vec![Type::var(0), Type::var(1), Type::var(2)],
+                vec![Mono, Mono, Mono],
+                Type::record(vec![
+                    (label("a"), Type::var(2)),
+                    (label("b"), Type::var(1)),
+                    (label("c"), Type::var(0)),
+                ])
+            ),
+            Term::Pack(
+                Type::var(2),
+                Box::new(Term::Pack(
+                    Type::var(1),
+                    Box::new(Term::Pack(
+                        Type::var(0),
+                        Box::new(Term::Int(1)),
+                        Type::some(
+                            vec![Mono],
+                            Type::record(vec![
+                                (label("a"), Type::var(3)),
+                                (label("b"), Type::var(2)),
+                                (label("c"), Type::var(0)),
+                            ])
+                        ),
+                    )),
+                    Type::some(
+                        vec![Mono, Mono],
+                        Type::record(vec![
+                            (label("a"), Type::var(4)),
+                            (label("b"), Type::var(1)),
+                            (label("c"), Type::var(0)),
+                        ])
+                    ),
+                )),
+                Type::some(
+                    vec![Mono, Mono, Mono],
+                    Type::record(vec![
+                        (label("a"), Type::var(2)),
+                        (label("b"), Type::var(1)),
+                        (label("c"), Type::var(0)),
+                    ])
+                ),
+            )
+        );
     }
 
     #[test]
@@ -2185,12 +2649,13 @@ mod tests {
 
     #[test]
     fn encoding() {
+        use crate::rrd2014::SemanticSig;
         use crate::rrd2014::SemanticSig::*;
         use Kind::*;
         use Type::*;
 
-        assert_encoding!(AtomicTerm(Int), Int);
-        assert_encoding!(AtomicTerm(Type::var(0)), Type::var(0));
+        assert_encoding!(SemanticSig::default_atomic_term(Int), Int);
+        assert_encoding!(SemanticSig::default_atomic_term(Type::var(0)), Type::var(0));
 
         assert_encoding!(
             AtomicType(Int, Mono),
@@ -2269,7 +2734,7 @@ mod tests {
         );
         assert_kinding_err!(
             Type::fun(Int, Type::abs(vec![Mono], Int)),
-            KindError::NotMono(
+            KindError::Codomain(
                 Type::abs(vec![Mono], Int),
                 NotMonoError(Kind::fun(Mono, Mono))
             )
@@ -2360,6 +2825,133 @@ mod tests {
         assert_eq!(
             close!(Type::fun(Var(v), Type::var(0))),
             Type::fun(Var(v), Type::var(0))
+        );
+    }
+
+    #[test]
+    fn kind_fun_env() {
+        use Kind::*;
+
+        let fun = Kind::fun;
+
+        assert_eq!(Kind::fun_env::<Type, ()>(&Env::default(), Mono), Mono);
+
+        assert_eq!(
+            Kind::fun_env::<Type, _>(
+                &Env {
+                    tenv: vec![(Mono, ())],
+                    ..Default::default()
+                },
+                Mono
+            ),
+            fun(Mono, Mono)
+        );
+
+        assert_eq!(
+            Kind::fun_env::<Type, _>(
+                &Env {
+                    tenv: vec![(fun(Mono, Mono), ()), (Mono, ())],
+                    ..Default::default()
+                },
+                Mono
+            ),
+            fun(fun(Mono, Mono), fun(Mono, Mono))
+        );
+
+        assert_eq!(
+            Kind::fun_env::<Type, _>(
+                &Env {
+                    tenv: vec![
+                        (fun(Mono, Mono), ()),
+                        (fun(Mono, fun(Mono, Mono)), ()),
+                        (Mono, ())
+                    ],
+                    ..Default::default()
+                },
+                fun(Mono, Mono)
+            ),
+            fun(
+                fun(Mono, Mono),
+                fun(fun(Mono, fun(Mono, Mono)), fun(Mono, fun(Mono, Mono)))
+            )
+        );
+    }
+
+    #[test]
+    fn type_abs_app_env() {
+        use Kind::*;
+        use Type::*;
+
+        let fun = Kind::fun;
+        let abs = Type::abs;
+        let app = Type::app;
+        let var = Type::var;
+
+        assert_eq!(Type::abs_env::<Type, ()>(&Env::default(), Int), Int);
+
+        assert_eq!(
+            Type::abs_env::<Type, _>(
+                &Env {
+                    tenv: vec![(Mono, ())],
+                    ..Default::default()
+                },
+                Int
+            ),
+            abs(vec![Mono], Int)
+        );
+
+        // Capture can occur.
+        assert_eq!(
+            Type::abs_env::<Type, _>(
+                &Env {
+                    tenv: vec![(fun(Mono, Mono), ()), (Mono, ())],
+                    ..Default::default()
+                },
+                var(0)
+            ),
+            abs(vec![Mono, fun(Mono, Mono)], var(0))
+        );
+
+        assert_eq!(
+            Type::abs_env::<Type, _>(
+                &Env {
+                    tenv: vec![
+                        (fun(Mono, Mono), ()),
+                        (fun(Mono, fun(Mono, Mono)), ()),
+                        (Mono, ())
+                    ],
+                    ..Default::default()
+                },
+                var(0)
+            ),
+            abs(
+                vec![Mono, fun(Mono, fun(Mono, Mono)), fun(Mono, Mono)],
+                var(0)
+            )
+        );
+
+        assert_eq!(Type::app_env::<Type, ()>(Int, &Env::default()), Int);
+
+        assert_eq!(
+            Type::app_env::<Type, ()>(
+                Int,
+                &Env {
+                    tenv: vec![(Mono, ())],
+                    ..Default::default()
+                },
+            ),
+            app(Int, var(0))
+        );
+
+        assert_eq!(
+            Type::app_env::<Type, ()>(
+                Int,
+                &Env {
+                    tenv: vec![(Mono, ()), (Mono, ())],
+                    ..Default::default()
+                },
+            ),
+            app(app(Int, var(1)), var(0))
         );
     }
 }

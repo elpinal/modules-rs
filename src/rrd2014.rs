@@ -16,6 +16,7 @@ use std::iter::FromIterator;
 
 use failure::Fail;
 
+use internal::EnvAbs;
 use internal::EnvError;
 use internal::Fgtv;
 use internal::Kind as IKind;
@@ -90,7 +91,8 @@ pub enum Binding {
 pub enum Sig {
     Path(Path),
     Seq(Vec<Decl>),
-    Fun(Ident, Box<Sig>, Box<Sig>),
+    Generative(Ident, Box<Sig>, Box<Sig>),
+    Applicative(Ident, Box<Sig>, Box<Sig>),
     Where(Box<Sig>, Proj<Ident>, Type),
 }
 
@@ -132,12 +134,22 @@ pub type AbstractSig = Existential<SemanticSig>;
 pub struct Fun(SemanticSig, AbstractSig);
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct Applicative(SemanticSig, SemanticSig);
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum SemanticSig {
-    AtomicTerm(IType),
+    AtomicTerm(SemanticPath, IType),
     AtomicType(IType, IKind),
     AtomicSig(Box<AbstractSig>),
     StructureSig(HashMap<Label, SemanticSig>),
     FunctorSig(Universal<Box<Fun>>),
+    Applicative(Universal<Box<Applicative>>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SemanticPath {
+    v: internal::Variable,
+    tys: Vec<IType>,
 }
 
 enum SemanticTerm {
@@ -150,6 +162,14 @@ struct BindingInformation {
     t: ITerm,
     n: usize,
     w: Vec<ITerm>,
+}
+
+type Memory<T, S> = Vec<(EnvAbs<T, S>, Purity, Vec<Label>, usize, usize, usize, usize)>;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Purity {
+    Pure,
+    Impure,
 }
 
 type Env = internal::Env<SemanticSig, Option<StemFrom>>;
@@ -197,6 +217,9 @@ pub enum TypeError {
 
     #[fail(display = "not abstract type: {:?}", _0)]
     NotAbstractType(IType),
+
+    #[fail(display = "value identity mismatch: {:?} and {:?}", _0, _1)]
+    SemanticPathMismatch(SemanticPath, SemanticPath),
 }
 
 impl From<EnvError> for TypeError {
@@ -214,6 +237,21 @@ impl From<SemanticSigError> for TypeError {
 impl From<!> for TypeError {
     fn from(e: !) -> Self {
         e
+    }
+}
+
+impl From<usize> for SemanticPath {
+    fn from(n: usize) -> Self {
+        SemanticPath {
+            v: internal::Variable::new(n),
+            tys: Vec::new(),
+        }
+    }
+}
+
+impl From<internal::Variable> for SemanticPath {
+    fn from(v: internal::Variable) -> Self {
+        SemanticPath { v, tys: Vec::new() }
     }
 }
 
@@ -259,6 +297,18 @@ impl<'a> From<&'a Ident> for StemFrom {
     }
 }
 
+impl<'a> From<&'a str> for StemFrom {
+    fn from(s: &str) -> Self {
+        StemFrom::from(Ident::from(s))
+    }
+}
+
+impl From<SemanticPath> for IType {
+    fn from(sp: SemanticPath) -> Self {
+        sp.tys.into_iter().fold(IType::Var(sp.v), IType::app)
+    }
+}
+
 impl<T: Substitution> Substitution for Quantified<T> {
     fn apply(&mut self, s: &Subst) {
         let n = self.qs.len();
@@ -286,12 +336,46 @@ impl Substitution for Fun {
     }
 }
 
+impl Substitution for Applicative {
+    fn apply(&mut self, s: &Subst) {
+        self.0.apply(s);
+        self.1.apply(s);
+    }
+}
+
+impl Substitution for SemanticPath {
+    fn apply(&mut self, s: &Subst) {
+        use IType::*;
+        self.tys.iter_mut().for_each(|ty| ty.apply(s));
+        let mut ty = self.v.apply_subst(s);
+        let mut w = Vec::new();
+        loop {
+            match ty {
+                Var(v) => {
+                    self.v = v;
+                    w.append(&mut self.tys);
+                    self.tys = w;
+                    return;
+                }
+                App(ty1, ty2) => {
+                    w.push(*ty2);
+                    ty = *ty1;
+                }
+                _ => panic!("substitution of semantic paths: unexpected error"),
+            }
+        }
+    }
+}
+
 impl Substitution for SemanticSig {
     fn apply(&mut self, s: &Subst) {
         use SemanticSig::*;
 
         match *self {
-            AtomicTerm(ref mut ty) => ty.apply(s),
+            AtomicTerm(ref mut sp, ref mut ty) => {
+                sp.apply(s);
+                ty.apply(s);
+            }
             AtomicType(ref mut ty, ref mut k) => {
                 k.apply(s);
                 ty.apply(s);
@@ -299,6 +383,7 @@ impl Substitution for SemanticSig {
             AtomicSig(ref mut asig) => asig.apply(s),
             StructureSig(ref mut m) => m.values_mut().for_each(|ssig| ssig.apply(s)),
             FunctorSig(ref mut u) => u.apply(s),
+            Applicative(ref mut u) => u.apply(s),
         }
     }
 }
@@ -350,11 +435,28 @@ impl Shift for Fun {
     }
 }
 
+impl Shift for Applicative {
+    fn shift_above(&mut self, c: usize, d: isize) {
+        self.0.shift_above(c, d);
+        self.1.shift_above(c, d);
+    }
+}
+
+impl Shift for SemanticPath {
+    fn shift_above(&mut self, c: usize, d: isize) {
+        self.v.shift_above(c, d);
+        self.tys.iter_mut().for_each(|ty| ty.shift_above(c, d));
+    }
+}
+
 impl Shift for SemanticSig {
     fn shift_above(&mut self, c: usize, d: isize) {
         use SemanticSig::*;
         match *self {
-            AtomicTerm(ref mut ty) => ty.shift_above(c, d),
+            AtomicTerm(ref mut sp, ref mut ty) => {
+                sp.shift_above(c, d);
+                ty.shift_above(c, d);
+            }
             AtomicType(ref mut ty, ref mut k) => {
                 ty.shift_above(c, d);
                 k.shift_above(c, d);
@@ -362,6 +464,7 @@ impl Shift for SemanticSig {
             AtomicSig(ref mut asig) => asig.shift_above(c, d),
             StructureSig(ref mut m) => m.values_mut().for_each(|ssig| ssig.shift_above(c, d)),
             FunctorSig(ref mut u) => u.shift_above(c, d),
+            Applicative(ref mut u) => u.shift_above(c, d),
         }
     }
 }
@@ -398,11 +501,31 @@ impl Fgtv for Fun {
     }
 }
 
+impl Fgtv for Applicative {
+    fn fgtv(&self) -> HashSet<usize> {
+        let mut s = self.0.fgtv();
+        s.extend(self.1.fgtv());
+        s
+    }
+}
+
+impl Fgtv for SemanticPath {
+    fn fgtv(&self) -> HashSet<usize> {
+        let mut s = self.v.fgtv();
+        s.extend(self.tys.iter().flat_map(|ty| ty.fgtv()));
+        s
+    }
+}
+
 impl Fgtv for SemanticSig {
     fn fgtv(&self) -> HashSet<usize> {
         use SemanticSig::*;
         match *self {
-            AtomicTerm(ref ty) => ty.fgtv(),
+            AtomicTerm(ref sp, ref ty) => {
+                let mut s = sp.fgtv();
+                s.extend(ty.fgtv());
+                s
+            }
             AtomicType(ref ty, ref k) => {
                 let mut s = ty.fgtv();
                 s.extend(k.fgtv());
@@ -411,6 +534,7 @@ impl Fgtv for SemanticSig {
             AtomicSig(ref asig) => asig.fgtv(),
             StructureSig(ref m) => m.values().flat_map(|ssig| ssig.fgtv()).collect(),
             FunctorSig(ref u) => u.fgtv(),
+            Applicative(ref u) => u.fgtv(),
         }
     }
 }
@@ -428,14 +552,22 @@ pub fn elaborate(m: Module) -> Result<(ITerm, AbstractSig, Vec<IKind>), TypeErro
     Ok((triple.0, triple.1, env.get_generated_type_env()))
 }
 
-trait Subtype {
+trait Subtype<RHS = Self> {
     type Error;
 
-    fn subtype_of(&self, env: &mut Env, another: &Self) -> Result<ITerm, Self::Error>;
+    fn subtype_of(&self, env: &mut Env, another: &RHS) -> Result<ITerm, Self::Error>;
 }
 
 trait Normalize {
     fn normalize(self) -> Self;
+}
+
+trait Lift<RHS = Self> {
+    fn lifted_by(self, another: &RHS) -> Self;
+}
+
+trait Pureness {
+    fn is_pure(&self) -> bool;
 }
 
 #[derive(Debug, Fail, PartialEq)]
@@ -477,9 +609,9 @@ impl SemanticSig {
         }
     }
 
-    fn get_atomic_term(self) -> Result<IType, SemanticSigError> {
+    fn get_atomic_term(self) -> Result<(SemanticPath, IType), SemanticSigError> {
         match self {
-            SemanticSig::AtomicTerm(ty) => Ok(ty),
+            SemanticSig::AtomicTerm(sp, ty) => Ok((sp, ty)),
             _ => Err(SemanticSigError::AtomicTerm(self)),
         }
     }
@@ -505,10 +637,79 @@ impl SemanticSig {
         }
     }
 
-    fn get_functor(self) -> Result<Universal<Fun>, SemanticSigError> {
+    fn get_functor(
+        self,
+    ) -> Result<(Universal<(SemanticSig, AbstractSig)>, Purity), SemanticSigError> {
+        use Purity::*;
+        use SemanticSig::*;
         match self {
-            SemanticSig::FunctorSig(u) => Ok(u.map(|f| *f)),
+            FunctorSig(u) => Ok((u.map(|f| Functorize::get_function(*f)), Impure)),
+            Applicative(u) => Ok((u.map(|f| Functorize::get_function(*f)), Pure)),
             _ => Err(SemanticSigError::Functor(self)),
+        }
+    }
+}
+
+impl Lift for Vec<(IKind, StemFrom)> {
+    fn lifted_by(self, another: &Self) -> Self {
+        self.into_iter()
+            .map(|(k, sf)| {
+                (
+                    another
+                        .iter()
+                        .fold(k, |acc, p| IKind::fun(p.0.clone(), acc)),
+                    sf,
+                )
+            })
+            .collect()
+    }
+}
+
+impl Lift<Env> for Vec<(IKind, StemFrom)> {
+    fn lifted_by(self, another: &Env) -> Self {
+        self.into_iter()
+            .map(|(k, sf)| (IKind::fun_env(another, k), sf))
+            .collect()
+    }
+}
+
+impl Pureness for Expr {
+    fn is_pure(&self) -> bool {
+        use Expr::*;
+        match *self {
+            Path(ref p) => p.is_pure(),
+            Pack(ref m, _) => m.is_pure(),
+            // In this implementation, the core language is purely functional.
+            _ => true,
+        }
+    }
+}
+
+impl Pureness for Path {
+    fn is_pure(&self) -> bool {
+        self.0.is_pure()
+    }
+}
+
+impl Pureness for Module {
+    fn is_pure(&self) -> bool {
+        use Module::*;
+        match *self {
+            App(..) | Unpack(..) => false,
+            Seq(ref bs) => bs.iter().all(|b| b.is_pure()),
+            Proj(ref m, _) => m.is_pure(),
+            _ => true,
+        }
+    }
+}
+
+impl Pureness for Binding {
+    fn is_pure(&self) -> bool {
+        use Binding::*;
+        match *self {
+            Val(_, ref e) => e.is_pure(),
+            Module(_, ref m) | Include(ref m) => m.is_pure(),
+            _ => true,
         }
     }
 }
@@ -576,9 +777,19 @@ impl Elaboration for Decl {
         };
         match *self {
             Val(ref id, ref ty) => {
-                let (ty, k, s) = ty.elaborate(env)?;
+                let (mut ty, k, s) = ty.elaborate(env)?;
                 k.mono().map_err(TypeError::NotMono)?;
-                Ok((f(id, AtomicTerm(ty)), s))
+                ty.shift(1);
+                Ok((
+                    Existential(Quantified {
+                        qs: vec![(IKind::Mono, id.into())],
+                        body: HashMap::from_iter(Some((
+                            id.into(),
+                            AtomicTerm(SemanticPath::from(0), ty),
+                        ))),
+                    }),
+                    s,
+                ))
             }
             ManType(ref id, ref ty) => {
                 let (ty, k, s) = ty.elaborate(env)?;
@@ -647,7 +858,7 @@ impl Elaboration for Sig {
                 env.drop_types(ex.0.qs.len());
                 Ok((ex.map(SemanticSig::StructureSig), s))
             }
-            Fun(ref id, ref domain, ref range) => {
+            Generative(ref id, ref domain, ref range) => {
                 let enter_state = env.get_state();
                 let (asig1, s1) = domain.elaborate(env)?;
                 env.insert_types(asig1.0.qs.clone().into_iter().map(|(k, s)| (k, Some(s))));
@@ -657,8 +868,32 @@ impl Elaboration for Sig {
                 env.drop_types(asig1.0.qs.len());
                 Ok((
                     Existential::from(SemanticSig::FunctorSig(
-                        Universal::from(asig1).map(|ssig| Box::new(self::Fun(ssig, asig2))),
+                        Universal::from(asig1).map(|ssig| Box::new(Fun(ssig, asig2))),
                     )),
+                    s1.compose(s2),
+                ))
+            }
+            Applicative(ref id, ref domain, ref range) => {
+                let enter_state = env.get_state();
+                let (mut asig1, s1) = domain.elaborate(env)?;
+                env.insert_types(asig1.0.qs.clone().into_iter().map(|(k, s)| (k, Some(s))));
+                env.insert_value(Name::from(id.clone()), asig1.0.body.clone());
+                let (asig2, s2) = range.elaborate(env)?;
+                env.drop_values_state(1, enter_state);
+                env.drop_types(asig1.0.qs.len());
+                let mut ssig2 = asig2.0.body;
+                let len2 = asig2.0.qs.len();
+                let qs = asig2.0.qs.lifted_by(&asig1.0.qs);
+                asig1.shift(isize::try_from(len2).unwrap());
+                ssig2.skolemize(asig1.0.qs.len(), len2);
+                Ok((
+                    Existential(Quantified {
+                        qs,
+                        body: SemanticSig::Applicative(
+                            Universal::from(asig1)
+                                .map(|ssig1| Box::new(self::Applicative(ssig1, ssig2))),
+                        ),
+                    }),
                     s1.compose(s2),
                 ))
             }
@@ -692,26 +927,142 @@ impl Elaboration for Sig {
 }
 
 impl Elaboration for Binding {
-    type Output = (ITerm, Existential<HashMap<Label, SemanticSig>>, Subst);
+    type Output = (
+        ITerm,
+        Existential<HashMap<Label, SemanticSig>>,
+        Subst,
+        Purity,
+    );
     type Error = TypeError;
 
     fn elaborate(&self, env: &mut Env) -> Result<Self::Output, Self::Error> {
         use Binding::*;
+        use Purity::*;
         use SemanticSig::*;
         match *self {
             Val(ref id, ref e) => {
+                // TODO: Which generalization strategy should be taken?
+                match *e {
+                    Expr::Path(ref p) => {
+                        let (t, asig, s, p) = p.0.elaborate(env)?;
+                        let (sp, ty) = asig.0.body.get_atomic_term()?;
+                        return Ok((
+                            ITerm::unpack(
+                                t,
+                                asig.0.qs.len(),
+                                ITerm::pack(
+                                    ITerm::abs_env_purity(
+                                        &*env,
+                                        p,
+                                        ITerm::record(Some((
+                                            id.into(),
+                                            ITerm::var(env.tenv_len()),
+                                        ))),
+                                    ),
+                                    (0..asig.0.qs.len()).map(IType::var).collect(),
+                                    asig.0.qs.iter().map(|p| p.0.clone()),
+                                    IType::forall_env_purity(
+                                        env,
+                                        p,
+                                        IType::record(Some((
+                                            id.into(),
+                                            AtomicTerm(sp.clone(), ty.clone()).into(),
+                                        ))),
+                                    ),
+                                ),
+                            ),
+                            Existential(Quantified {
+                                qs: asig.0.qs,
+                                body: HashMap::from_iter(Some((id.into(), AtomicTerm(sp, ty)))),
+                            }),
+                            s,
+                            p,
+                        ));
+                    }
+                    _ if e.is_pure() => {
+                        let (mut t, mut ty, s) = e.elaborate(env)?;
+                        ty.shift(1);
+                        let (scheme, s1, ks) = ty.close(env);
+                        t.shift(isize::try_from(ks.len()).unwrap());
+                        t.apply(&s1);
+                        return Ok((
+                            ITerm::pack(
+                                ITerm::abs_env(
+                                    &*env,
+                                    ITerm::record(Some((
+                                        id.into(),
+                                        ITerm::poly(ks, ITerm::from(SemanticTerm::Term(t))),
+                                    ))),
+                                ),
+                                vec![IType::abs_env(&*env, IType::record(None))],
+                                Some(IKind::fun_env(&*env, IKind::Mono)),
+                                IType::forall_env(
+                                    env,
+                                    IType::record(Some((
+                                        id.into(),
+                                        IType::from(AtomicTerm(
+                                            SemanticPath {
+                                                v: internal::Variable::new(0),
+                                                tys: (0..env.tenv_len())
+                                                    .rev()
+                                                    .map(|n| IType::var(n + 1))
+                                                    .collect(),
+                                            },
+                                            scheme.clone(),
+                                        )),
+                                    ))),
+                                ),
+                            ),
+                            Existential(Quantified {
+                                qs: vec![(IKind::fun_env(env, IKind::Mono), id.into())],
+                                body: HashMap::from_iter(Some((
+                                    id.into(),
+                                    AtomicTerm(
+                                        SemanticPath {
+                                            v: internal::Variable::new(0),
+                                            tys: (0..env.tenv_len())
+                                                .rev()
+                                                .map(|n| IType::var(n + 1))
+                                                .collect(),
+                                        },
+                                        scheme,
+                                    ),
+                                ))),
+                            }),
+                            s,
+                            Pure,
+                        ));
+                    }
+                    _ => (),
+                }
                 let (t, ty, s) = e.elaborate(env)?;
-                let (scheme, s1, ks) = ty.close(env);
+                let (mut scheme, s1, ks) = ty.close(env);
                 let mut t = ITerm::from(SemanticTerm::Term(t));
                 t.shift(isize::try_from(ks.len()).unwrap());
                 t.apply(&s1);
+                scheme.shift(1);
                 Ok((
-                    ITerm::record(vec![(Label::from(id.clone()), ITerm::poly(ks, t))]),
-                    Existential::from(HashMap::from_iter(vec![(
-                        Label::from(id.clone()),
-                        AtomicTerm(scheme),
-                    )])),
+                    ITerm::pack(
+                        ITerm::record(Some((
+                            id.into(),
+                            ITerm::poly(ks, ITerm::from(SemanticTerm::Term(t))),
+                        ))),
+                        vec![IType::record(None)],
+                        Some(IKind::Mono),
+                        IType::record(Some((
+                            id.into(),
+                            IType::from(AtomicTerm(SemanticPath::from(0), scheme.clone())),
+                        ))),
+                    ),
+                    Existential(Quantified {
+                        qs: vec![(IKind::Mono, id.into())],
+                        body: HashMap::from_iter(Some((
+                            id.into(),
+                            AtomicTerm(SemanticPath::from(0), scheme),
+                        ))),
+                    }),
                     s,
+                    Impure,
                 ))
             }
             Type(ref id, ref ty) => {
@@ -719,117 +1070,304 @@ impl Elaboration for Binding {
                     .elaborate(env)
                     .map_err(|e| TypeError::TypeBinding(id.clone(), Box::new(e)))?;
                 Ok((
-                    ITerm::record(vec![(
-                        Label::from(id.clone()),
-                        SemanticTerm::Type(ty.clone(), k.clone()).into(),
-                    )]),
+                    ITerm::abs_env(
+                        env,
+                        ITerm::record(vec![(
+                            Label::from(id.clone()),
+                            SemanticTerm::Type(ty.clone(), k.clone()).into(),
+                        )]),
+                    ),
                     Existential::from(HashMap::from_iter(vec![(
                         Label::from(id.clone()),
                         AtomicType(ty, k),
                     )])),
                     s,
+                    Pure,
                 ))
             }
             Module(ref id, ref m) => {
-                let (t, asig, s) = m.elaborate(env)?;
+                let (t, asig, s, p) = m.elaborate(env)?;
                 asig.0.body.atomic()?;
                 Ok((
                     ITerm::unpack(
                         t,
                         asig.0.qs.len(),
                         ITerm::pack(
-                            ITerm::record(vec![(Label::from(id.clone()), ITerm::var(0))]),
+                            ITerm::abs_env_purity(
+                                &*env,
+                                p,
+                                ITerm::record(vec![(
+                                    Label::from(id),
+                                    ITerm::app_env_purity(
+                                        ITerm::var(env.venv_len_purity(p)),
+                                        &*env,
+                                        p,
+                                    ),
+                                )]),
+                            ),
                             (0..asig.0.qs.len()).map(IType::var).collect(),
-                            asig.0.qs.iter().map(|p| p.0.clone()),
-                            StructureSig(HashMap::from_iter(Some((
-                                Label::from(id.clone()),
-                                asig.0.body.clone(),
-                            ))))
-                            .into(),
+                            // TODO: Is this `rev` correct?
+                            asig.0.qs.iter().map(|p| p.0.clone()).rev(),
+                            IType::forall_env_purity_swap(
+                                env,
+                                p,
+                                asig.0.qs.len(),
+                                IType::record(Some((id.into(), asig.0.body.clone().into()))),
+                            ),
                         ),
                     ),
                     asig.map(|ssig| HashMap::from_iter(vec![(Label::from(id.clone()), ssig)])),
                     s,
+                    p,
                 ))
             }
             Signature(ref id, ref sig) => {
                 let (asig, s) = sig.elaborate(env)?;
                 Ok((
-                    ITerm::record(Some((
-                        Label::from(id),
-                        SemanticTerm::Sig(asig.clone()).into(),
-                    ))),
+                    ITerm::abs_env(
+                        env,
+                        ITerm::record(Some((id.into(), SemanticTerm::Sig(asig.clone()).into()))),
+                    ),
                     Existential::from(HashMap::from_iter(Some((
-                        Label::from(id),
+                        id.into(),
                         SemanticSig::AtomicSig(Box::new(asig)),
                     )))),
                     s,
+                    Pure,
                 ))
             }
             Include(ref m) => {
-                let (t, asig, s) = m.elaborate(env)?;
+                let (t, asig, s, p) = m.elaborate(env)?;
                 let ex = asig.try_map::<_, _, TypeError, _>(|ssig| ssig.get_structure())?;
-                Ok((t, ex, s))
+                Ok((t, ex, s, p))
             }
         }
     }
 }
 
 impl Elaboration for Module {
-    type Output = (ITerm, AbstractSig, Subst);
+    type Output = (ITerm, AbstractSig, Subst, Purity);
     type Error = TypeError;
 
     #[allow(clippy::many_single_char_names)]
     fn elaborate(&self, env: &mut Env) -> Result<Self::Output, Self::Error> {
         use Module::*;
+        use Purity::*;
         match *self {
             Ident(ref id) => {
                 let (ssig, v) = env.lookup_value_by_name(id.into())?;
-                Ok((ITerm::Var(v), Existential::from(ssig), Subst::default()))
+                Ok((
+                    ITerm::abs_env(env, ITerm::Var(v)),
+                    Existential::from(ssig),
+                    Subst::default(),
+                    Pure,
+                ))
             }
             Seq(ref bs) => {
+                use internal::Variable::Variable as V;
                 let mut v = Vec::new();
                 let mut ls = HashMap::new();
                 let mut qs = Vec::new();
                 let mut body = HashMap::new();
                 let mut ret_subst = Subst::default();
                 let mut n = 0;
+                let mut z = 0;
+                let mut d = 0;
+                let mut memory: Memory<_, _> = Vec::new();
+                let mut qs_count = 0;
                 let enter_state = env.get_state();
-                for b in bs {
-                    let (t, ex, s) = b.elaborate(env)?;
+                for (i, b) in bs.iter().enumerate() {
+                    let (t, ex, s, p) = b.elaborate(env)?;
                     let len = ex.0.qs.len();
+                    let z0 = z;
+                    z += if len == 0 { 1 } else { len };
+                    memory.push((
+                        EnvAbs::from(&*env),
+                        p,
+                        ex.0.body.keys().cloned().collect(),
+                        z,
+                        qs_count,
+                        d,
+                        z0,
+                    ));
+                    qs_count += len;
                     n += if len == 0 { 1 } else { len };
                     let n0 = n;
                     ret_subst = ret_subst.compose(s.clone());
                     body.apply(&s);
                     v.apply(&s);
                     env.insert_types(ex.0.qs.clone().into_iter().map(|(k, s)| (k, Some(s))));
-                    env.insert_dummy_values(if len == 0 { 1 } else { len });
+                    env.insert_dummy_values_at(V(d), if len == 0 { 1 } else { len });
                     qs.extend(ex.0.qs.clone());
                     body.shift(isize::try_from(len).unwrap());
                     body.extend(ex.0.body.clone());
                     let mut w = Vec::new();
                     for (i, (l, ssig)) in ex.0.body.into_iter().enumerate() {
                         ls.insert(l.clone(), n0);
+                        // `w` might be unneeded.
                         w.push(ITerm::proj(ITerm::var(i), Some(l.clone())));
                         n += 1;
+                        d += 1;
                         env.insert_value(Name::try_from(l).unwrap(), ssig);
                     }
+                    let mut j = 0;
+                    let t = ITerm::let_in(
+                        memory[..i]
+                            .iter()
+                            .flat_map(|&(ref ea, p0, ref ls, i0, _, _, _)| {
+                                ls.iter()
+                                    .map(|l| {
+                                        let ret = ITerm::abs_env_purity(
+                                            ea.clone(),
+                                            p.join(p0),
+                                            ITerm::proj(
+                                                ITerm::app_env_purity_skip(
+                                                    ITerm::var(
+                                                        z0 - i0
+                                                            + j
+                                                            + ea.venv_len_purity(p.join(p0)),
+                                                    ),
+                                                    ea.clone(),
+                                                    p0,
+                                                    0,
+                                                    0,
+                                                    0,
+                                                ),
+                                                Some(l.clone()),
+                                            ),
+                                        );
+                                        j += 1;
+                                        ret
+                                    })
+                                    .collect::<Vec<_>>()
+                            })
+                            .collect::<Vec<_>>(),
+                        t,
+                    );
                     v.push(BindingInformation { t, n: len, w });
                 }
+                let ea_last = EnvAbs::from(&*env);
                 env.drop_values_state(n, enter_state);
                 env.drop_types(qs.len());
-                let m = ls
-                    .into_iter()
-                    .flat_map(|(l, i)| Some((l.clone(), ITerm::proj(ITerm::var(n - i), Some(l)))));
+                let mut n0 = 0;
+                let m: HashMap<Label, ITerm> = memory
+                    .iter()
+                    .rev()
+                    .map(|x| -> HashMap<Label, ITerm> {
+                        x.2.iter()
+                            .rev()
+                            .map(|l| -> (Label, ITerm) {
+                                let p = (l.clone(), ITerm::var(n0));
+                                n0 += 1;
+                                p
+                            })
+                            .collect()
+                    })
+                    .flatten()
+                    .collect();
+                let p_all = memory.iter().fold(Pure, |acc, entry| acc.join(entry.1));
+                let mut j = 0;
+                let body0 = {
+                    let mut body0 = body.clone();
+                    if p_all.is_pure() {
+                        let s = Subst::from_iter(
+                            (0..qs_count)
+                                .map(|i| (V(i), IType::var(i + qs_count + env.tenv_len()))),
+                        );
+                        body0.apply(&s);
+                        body0.shift(-isize::try_from(qs_count).unwrap());
+                    }
+                    body0
+                };
                 let t = v.into_iter().rfold(
                     ITerm::pack(
-                        ITerm::record(m),
+                        ITerm::abs_env_purity(
+                            &*env,
+                            p_all,
+                            ITerm::let_in(
+                                memory
+                                    .iter()
+                                    .flat_map(|&(_, p0, ref ls, i0, qs_count0, d0, z0)| {
+                                        ls.iter()
+                                            .enumerate()
+                                            .map(|(q, l)| {
+                                                let ret = ITerm::proj(
+                                                    if p_all.is_pure() {
+                                                        if p0.is_impure() {
+                                                            ITerm::var(
+                                                                z - i0
+                                                                    + j
+                                                                    + env.venv_len_purity(p_all),
+                                                            )
+                                                        } else {
+                                                            (0..d0).rfold(
+                                                            (0..z0).rfold(
+                                                            ITerm::app_env_seq(
+                                                            (1..=qs_count0).fold(
+                                                                (0..env.tenv_len()).rfold(
+                                                                    ITerm::var(
+                                                                        z - i0
+                                                                            + j
+                                                                            + env.venv_len_purity(
+                                                                                p_all,
+                                                                            ),
+                                                                    ),
+                                                                    |acc, i| {
+                                                                        ITerm::inst(
+                                                                            acc,
+                                                                            Some(IType::var(i)),
+                                                                        )
+                                                                    },
+                                                                ),
+                                                                |acc, i| {
+                                                                    ITerm::inst(
+                                                                        acc,
+                                                                        Some(IType::var(
+                                                                            qs_count - i
+                                                                                + env.tenv_len(),
+                                                                        )),
+                                                                    )
+                                                                },
+                                                            ),
+                                                            &*env, 0, j),
+                                                            |acc, _| ITerm::app(acc, ITerm::trivial())),
+                                                            |acc, i| ITerm::app(acc, ITerm::var(i + q)))
+                                                        }
+                                                    } else {
+                                                        // TODO: need investigation.
+                                                        ITerm::app_env_purity_skip(
+                                                            ITerm::var(
+                                                                z - i0
+                                                                    + j
+                                                                    + env.venv_len_purity(p_all),
+                                                            ),
+                                                            ea_last.clone(),
+                                                            p0,
+                                                            qs_count - qs_count0,
+                                                            d - d0,
+                                                            0,
+                                                        )
+                                                    },
+                                                    Some(l.clone()),
+                                                );
+                                                j += 1;
+                                                ret
+                                            })
+                                            .collect::<Vec<_>>()
+                                    })
+                                    .collect::<Vec<_>>(),
+                                ITerm::record(m),
+                            ),
+                        ),
                         (0..qs.len()).map(IType::var).collect(),
-                        qs.iter().map(|p| p.0.clone()),
-                        SemanticSig::StructureSig(body.clone()).into(),
+                        qs.iter().map(|p| p.0.clone()).rev(),
+                        IType::forall_env_purity(
+                            env,
+                            p_all,
+                            SemanticSig::StructureSig(body0).into(),
+                        ),
                     ),
-                    |t0, BindingInformation { t, n, w }| ITerm::unpack(t, n, ITerm::let_in(w, t0)),
+                    |t0, BindingInformation { t, n, .. }| ITerm::unpack(t, n, t0),
                 );
                 Ok((
                     t,
@@ -838,11 +1376,12 @@ impl Elaboration for Module {
                         body: SemanticSig::StructureSig(body),
                     }),
                     ret_subst,
+                    p_all,
                 ))
             }
             Proj(ref m, ref id) => {
                 // TODO: there may be room for performance improvement.
-                let (t, asig, s) = m.elaborate(env)?;
+                let (t, asig, s, p) = m.elaborate(env)?;
                 let asig0 = asig.clone().try_map::<_, _, TypeError, _>(|ssig| {
                     let mut m = ssig.get_structure()?;
                     m.remove(&id.into())
@@ -853,29 +1392,63 @@ impl Elaboration for Module {
                         t,
                         asig.0.qs.len(),
                         ITerm::pack(
-                            ITerm::proj(ITerm::var(0), Some(id.into())),
+                            ITerm::abs_env_purity(
+                                &*env,
+                                p,
+                                ITerm::proj(
+                                    ITerm::app_env_purity(
+                                        ITerm::var(env.venv_len_purity(p)),
+                                        &*env,
+                                        p,
+                                    ),
+                                    Some(id.into()),
+                                ),
+                            ),
                             (0..asig.0.qs.len()).map(IType::var).collect(),
                             asig.0.qs.iter().map(|p| p.0.clone()),
-                            asig0.0.body.clone().into(),
+                            IType::forall_env_purity_swap(
+                                &*env,
+                                p,
+                                asig0.0.qs.len(),
+                                asig0.0.body.clone().into(),
+                            ),
                         ),
                     ),
                     asig0,
                     s,
+                    p,
                 ))
             }
             Seal(ref id, ref sig) => {
                 let (ssig, v) = env.lookup_value_by_name(id.into())?;
                 let (asig, s) = sig.elaborate(env)?;
                 let (t, tys) = ssig.r#match(env, &asig)?;
+                let qs = asig.0.qs.clone().lifted_by(env);
+                let mut body = asig.0.body.clone();
+                {
+                    use internal::Variable::Variable as V;
+                    let s0 = Subst::from_iter(
+                        (0..qs.len()).map(|i| (V(i), IType::app_env(IType::var(i), env))),
+                    );
+                    body.apply(&s0);
+                }
                 Ok((
                     ITerm::pack(
-                        ITerm::app(t, ITerm::Var(v)),
-                        tys,
-                        asig.0.qs.iter().map(|p| p.0.clone()),
-                        asig.0.body.clone().into(),
+                        ITerm::abs_env(&*env, ITerm::app(t, ITerm::Var(v))),
+                        tys.into_iter()
+                            .map(|ty| IType::abs_env(&*env, ty))
+                            .collect(),
+                        asig.0.qs.iter().map(|p| IKind::fun_env(&*env, p.0.clone())),
+                        IType::forall_env_purity_swap(
+                            &*env,
+                            Pure,
+                            asig.0.qs.len(),
+                            body.clone().into(),
+                        ),
                     ),
-                    asig,
+                    Existential(Quantified { qs, body }),
                     s,
+                    Pure,
                 ))
             }
             Fun(ref id, ref sig, ref m) => {
@@ -883,26 +1456,58 @@ impl Elaboration for Module {
                 let enter_state = env.get_state();
                 env.insert_types(asig1.0.qs.clone().into_iter().map(|(k, s)| (k, Some(s))));
                 env.insert_value(Name::from(id.clone()), asig1.0.body.clone());
-                let (t, asig2, s2) = m.elaborate(env)?;
+                let (t, asig2, s2, p) = m.elaborate(env)?;
                 // TODO: apply `s2` to `asig1`?
                 env.drop_values_state(1, enter_state);
                 env.drop_types(asig1.0.qs.len());
+                if p.is_pure() {
+                    use internal::Variable::Variable as V;
+
+                    let mut asig1 = asig1;
+                    asig1.shift(isize::try_from(asig2.0.qs.len()).unwrap());
+
+                    let m = asig1.0.qs.len();
+                    let n = asig2.0.qs.len();
+                    let s = Subst::from_iter(
+                        (0..n)
+                            .map(|i| (i, i + m))
+                            .chain((0..m).map(|i| (n + i, i)))
+                            .map(|(i, j)| (V(i), IType::var(j))),
+                    );
+
+                    return Ok((
+                        t,
+                        asig2.map(|mut ssig2| {
+                            ssig2.apply(&s);
+                            SemanticSig::Applicative(
+                                Universal::from(asig1)
+                                    .map(|ssig1| Box::new(Applicative(ssig1, ssig2))),
+                            )
+                        }),
+                        s1.compose(s2),
+                        Pure,
+                    ));
+                }
                 Ok((
-                    ITerm::poly(
-                        asig1.0.qs.iter().map(|p| p.0.clone()),
-                        ITerm::abs(asig1.0.body.clone().into(), t),
+                    ITerm::abs_env(
+                        env,
+                        ITerm::poly(
+                            asig1.0.qs.iter().map(|p| p.0.clone()),
+                            ITerm::abs(asig1.0.body.clone().into(), t),
+                        ),
                     ),
                     Existential::from(SemanticSig::FunctorSig(
                         Universal::from(asig1).map(|ssig| Box::new(self::Fun(ssig, asig2))),
                     )),
                     s1.compose(s2),
+                    Pure,
                 ))
             }
             App(ref id1, ref id2) => {
                 let (ssig1, v1) = env.lookup_value_by_name(id1.into())?;
                 let (ssig2, v2) = env.lookup_value_by_name(id2.into())?;
-                let u = ssig1.get_functor()?;
-                let self::Fun(ssig1, mut asig1) = u.0.body;
+                let (u, p) = ssig1.get_functor()?;
+                let (ssig1, mut asig1) = u.0.body;
                 let len = u.0.qs.len();
                 let (t, tys) = ssig2.r#match(
                     env,
@@ -916,12 +1521,17 @@ impl Elaboration for Module {
                 // TODO: This may be wrong.
                 asig1.apply(&s);
                 Ok((
-                    ITerm::app(
-                        ITerm::inst(ITerm::Var(v1), tys),
-                        ITerm::app(t, ITerm::Var(v2)),
+                    ITerm::abs_env_purity(
+                        env,
+                        p,
+                        ITerm::app(
+                            ITerm::inst(ITerm::Var(v1), tys),
+                            ITerm::app(t, ITerm::Var(v2)),
+                        ),
                     ),
                     asig1,
                     Subst::default(),
+                    p,
                 ))
             }
             Unpack(ref e, ref sig) => {
@@ -932,7 +1542,7 @@ impl Elaboration for Module {
                 if !ty.equal(&ty1) {
                     Err(TypeError::TypeMismatch(ty, ty1))?;
                 }
-                Ok((t, asig, s1.compose(s2)))
+                Ok((t, asig, s1.compose(s2), Impure))
             }
         }
     }
@@ -943,15 +1553,19 @@ impl Elaboration for Path {
     type Error = TypeError;
 
     fn elaborate(&self, env: &mut Env) -> Result<Self::Output, Self::Error> {
-        let (t, asig, s) = self.0.elaborate(env)?;
-        // Need shift?
+        let (t, asig, s, p) = self.0.elaborate(env)?;
+        // TODO: Need shift?
         IType::from(asig.0.body.clone())
             .kind_of(env)
             .map_err(TypeError::KindError)?
             .mono()
             .map_err(TypeError::NotMono)?;
         Ok((
-            ITerm::unpack(t, asig.0.qs.len(), ITerm::var(0)),
+            ITerm::unpack(
+                t,
+                asig.0.qs.len(),
+                ITerm::app_env_purity(ITerm::var(0), env, p),
+            ),
             asig.0.body,
             s,
         ))
@@ -962,11 +1576,32 @@ impl Subtype for IType {
     type Error = TypeError;
 
     fn subtype_of(&self, _: &mut Env, another: &Self) -> Result<ITerm, Self::Error> {
-        if self.equal(another) {
-            Ok(ITerm::abs(self.clone(), ITerm::var(0)))
+        if let Ok((tys, v)) = self.is_general(another) {
+            Ok(ITerm::abs(
+                self.clone(),
+                ITerm::poly(v.into_iter().rev(), ITerm::inst(ITerm::var(0), tys)),
+            ))
         } else {
             Err(TypeError::NotSubtype(self.clone(), another.clone()))
         }
+    }
+}
+
+impl Subtype<AbstractSig> for SemanticSig {
+    type Error = TypeError;
+
+    fn subtype_of(&self, env: &mut Env, another: &AbstractSig) -> Result<ITerm, Self::Error> {
+        let ty: IType = self.clone().into();
+        let (t, tys) = self.r#match(env, another)?;
+        Ok(ITerm::abs(
+            ty,
+            ITerm::pack(
+                ITerm::app(t, ITerm::var(0)),
+                tys,
+                another.0.qs.iter().map(|p| p.0.clone()),
+                another.0.body.clone().into(),
+            ),
+        ))
     }
 }
 
@@ -976,10 +1611,13 @@ impl Subtype for SemanticSig {
     fn subtype_of(&self, env: &mut Env, another: &Self) -> Result<ITerm, Self::Error> {
         use SemanticSig::*;
         match (self, another) {
-            (&AtomicTerm(ref ty1), &AtomicTerm(ref ty2)) => {
+            (&AtomicTerm(ref sp1, ref ty1), &AtomicTerm(ref sp2, ref ty2)) => {
+                if !sp1.equal(sp2) {
+                    return Err(TypeError::SemanticPathMismatch(sp1.clone(), sp2.clone()));
+                }
                 let t = ty1.subtype_of(env, ty2)?;
                 Ok(ITerm::abs(
-                    IType::from(AtomicTerm(ty1.clone())),
+                    IType::from(AtomicTerm(sp1.clone(), ty1.clone())),
                     ITerm::from(SemanticTerm::Term(ITerm::app(t, ITerm::var(0)))),
                 ))
             }
@@ -1020,50 +1658,64 @@ impl Subtype for SemanticSig {
                 }
                 Ok(ITerm::abs(IType::from(self.clone()), ITerm::record(m)))
             }
-            (&FunctorSig(ref u1), &FunctorSig(ref u2)) => {
-                env.insert_types(u2.0.qs.clone().into_iter().map(|(k, s)| (k, Some(s))));
-                let Fun(ssig1, mut asig1) = *u1.0.body.clone();
-                let Fun(ref ssig2, ref asig2) = *u2.0.body;
-                // contra-variant.
-                let (t1, tys) = ssig2.r#match(
-                    env,
-                    &Existential(Quantified {
-                        qs: u1.0.qs.clone(),
-                        body: ssig1,
-                    }),
-                )?;
-                let s = Subst::from_iter(
-                    (0..u1.0.qs.len())
-                        .rev()
-                        .map(internal::Variable::new)
-                        .zip(tys.clone()),
-                );
-                asig1.apply(&s);
-                // TODO: maybe `asig1.shift(-u1.0.qs.len())` is needed here.
-
-                // covariant.
-                let t2 = asig1.subtype_of(env, &asig2)?;
-                env.drop_types(u2.0.qs.len());
-                Ok(ITerm::abs(
-                    u1.clone().into(),
-                    ITerm::poly(
-                        u2.0.qs.iter().map(|p| p.0.clone()),
-                        ITerm::abs(
-                            ssig2.clone().into(),
-                            ITerm::app(
-                                t2,
-                                ITerm::app(
-                                    ITerm::inst(ITerm::var(1), tys),
-                                    ITerm::app(t1, ITerm::var(0)),
-                                ),
-                            ),
-                        ),
-                    ),
-                ))
-            }
+            (&FunctorSig(ref u1), &FunctorSig(ref u2)) => subtype_functor(env, u1, u2),
+            (&Applicative(ref u1), &FunctorSig(ref u2)) => subtype_functor(env, u1, u2),
+            (&Applicative(ref u1), &Applicative(ref u2)) => subtype_functor(env, u1, u2),
             _ => Err(TypeError::NotSubsignature(self.clone(), another.clone())),
         }
     }
+}
+
+fn subtype_functor<T, U>(
+    env: &mut Env,
+    u1: &Universal<Box<T>>,
+    u2: &Universal<Box<U>>,
+) -> Result<ITerm, TypeError>
+where
+    T: Functional + Clone + Into<IType>,
+    U: Functional + Clone + Into<IType>,
+    TypeError: From<<T::Range as Subtype<U::Range>>::Error>,
+    T::Range: Subtype<U::Range>,
+{
+    env.insert_types(u2.0.qs.clone().into_iter().map(|(k, s)| (k, Some(s))));
+    let (ssig1, mut asig1) = u1.0.body.clone().get_function();
+    let (ssig2, asig2) = u2.0.body.ref_function();
+    // contra-variant.
+    let (t1, tys) = ssig2.r#match(
+        env,
+        &Existential(Quantified {
+            qs: u1.0.qs.clone(),
+            body: ssig1,
+        }),
+    )?;
+    let s = Subst::from_iter(
+        (0..u1.0.qs.len())
+            .rev()
+            .map(internal::Variable::new)
+            .zip(tys.clone()),
+    );
+    asig1.apply(&s);
+    // TODO: maybe `asig1.shift(-u1.0.qs.len())` is needed here.
+
+    // covariant.
+    let t2 = asig1.subtype_of(env, &asig2)?;
+    env.drop_types(u2.0.qs.len());
+    Ok(ITerm::abs(
+        u1.clone().into(),
+        ITerm::poly(
+            u2.0.qs.iter().map(|p| p.0.clone()),
+            ITerm::abs(
+                ssig2.clone().into(),
+                ITerm::app(
+                    t2,
+                    ITerm::app(
+                        ITerm::inst(ITerm::var(1), tys),
+                        ITerm::app(t1, ITerm::var(0)),
+                    ),
+                ),
+            ),
+        ),
+    ))
 }
 
 impl Subtype for AbstractSig {
@@ -1073,6 +1725,7 @@ impl Subtype for AbstractSig {
         env.insert_types(self.0.qs.clone().into_iter().map(|(k, s)| (k, Some(s))));
         let ty: IType = self.clone().into();
         let (t, tys) = self.0.body.r#match(env, another)?;
+        // FIXME: drop types from `env`.
         Ok(ITerm::abs(
             ty,
             ITerm::unpack(
@@ -1096,11 +1749,18 @@ impl Normalize for IType {
     }
 }
 
+impl Normalize for SemanticPath {
+    fn normalize(self) -> Self {
+        // TODO: What is the correct definition?
+        self
+    }
+}
+
 impl Normalize for SemanticSig {
     fn normalize(self) -> Self {
         use SemanticSig::*;
         match self {
-            AtomicTerm(ty) => AtomicTerm(ty.normalize()),
+            AtomicTerm(sp, ty) => AtomicTerm(sp.normalize(), ty.normalize()),
             AtomicType(..) => self,
             AtomicSig(asig) => AtomicSig(Box::new(asig.normalize())),
             StructureSig(m) => StructureSig(
@@ -1115,6 +1775,17 @@ impl Normalize for SemanticSig {
                 let mut f = Fun(ssig, asig.normalize());
                 f.apply(&s);
                 FunctorSig(Universal(Quantified {
+                    qs: ks,
+                    body: Box::new(f),
+                }))
+            }
+            Applicative(u) => {
+                let self::Applicative(ssig1, ssig2) = *u.0.body;
+                let ssig1 = ssig1.normalize();
+                let (ks, s) = ssig1.sort_quantifiers(u.0.qs);
+                let mut f = self::Applicative(ssig1, ssig2.normalize());
+                f.apply(&s);
+                Applicative(Universal(Quantified {
                     qs: ks,
                     body: Box::new(f),
                 }))
@@ -1148,6 +1819,10 @@ impl<T> From<Existential<T>> for Universal<T> {
 }
 
 impl<T> Quantified<T> {
+    fn new(qs: Vec<(IKind, StemFrom)>, body: T) -> Self {
+        Quantified { qs, body }
+    }
+
     fn map<F, U>(self, f: F) -> Quantified<U>
     where
         F: FnOnce(T) -> U,
@@ -1172,7 +1847,7 @@ impl<T> Quantified<T> {
 
 impl<T> Existential<T> {
     fn new(qs: Vec<(IKind, StemFrom)>, body: T) -> Self {
-        Existential(Quantified { qs, body })
+        Existential(Quantified::new(qs, body))
     }
 
     fn map<F, U>(self, f: F) -> Existential<U>
@@ -1192,6 +1867,10 @@ impl<T> Existential<T> {
 }
 
 impl<T> Universal<T> {
+    fn new(qs: Vec<(IKind, StemFrom)>, body: T) -> Self {
+        Universal(Quantified::new(qs, body))
+    }
+
     fn map<F, U>(self, f: F) -> Universal<U>
     where
         F: FnOnce(T) -> U,
@@ -1248,12 +1927,12 @@ impl Expr {
                 let mut ty0 = IType::Var(v);
                 let name = Name::from(id.clone());
                 let enter_state = env.get_state();
-                env.insert_value(name.clone(), SemanticSig::AtomicTerm(ty0.clone()));
+                env.insert_value(name.clone(), SemanticSig::default_atomic_term(ty0.clone()));
                 let (t, ty, s) = e.infer(env)?;
                 env.drop_values_state(1, enter_state);
                 ty0.apply(&s);
                 Ok((
-                    ITerm::abs(SemanticSig::AtomicTerm(ty0.clone()).into(), t),
+                    ITerm::abs(SemanticSig::default_atomic_term(ty0.clone()).into(), t),
                     IType::fun(ty0, ty),
                     s,
                 ))
@@ -1273,17 +1952,42 @@ impl Expr {
                 Ok((ITerm::app(t1, t2), v, s))
             }
             Path(ref p) => {
-                let (t, ssig, s) = p.elaborate(env)?;
-                let ty = ssig.get_atomic_term()?;
+                let (t, asig, s, p) = p.0.elaborate(env)?;
+                let qs = asig.0.qs;
+                let (_, ty) = asig.0.body.get_atomic_term()?;
+                // Need shift?
+                ty.kind_of(env)
+                    .map_err(TypeError::KindError)?
+                    .mono()
+                    .map_err(TypeError::NotMono)?;
                 let (ty, tys) = ty.new_instance(env);
-                Ok((ITerm::inst(t, tys), ty, s))
+                let mut t1 = ITerm::app_env_purity_skip(ITerm::var(0), env, p, 0, 0, 1);
+                t1.shift(isize::try_from(qs.len()).unwrap());
+                Ok((ITerm::unpack(t, qs.len(), ITerm::inst(t1, tys)), ty, s))
             }
             Pack(ref m, ref sig) => {
-                let (t2, asig0, s1) = m.elaborate(env)?;
+                let (t2, asig0, s1, p) = m.elaborate(env)?;
                 let (asig, s2) = sig.elaborate(env)?;
                 let asig = asig.normalize();
                 let t1 = asig0.subtype_of(env, &asig)?;
-                Ok((ITerm::app(t1, t2), asig.into(), s1.compose(s2)))
+                Ok((
+                    ITerm::app(
+                        t1,
+                        ITerm::unpack(
+                            t2,
+                            asig0.0.qs.len(),
+                            ITerm::pack(
+                                // TODO: Perhaps need shift by `asig0.0.qs.len()`.
+                                ITerm::app_env_purity(ITerm::var(0), env, p),
+                                (0..asig0.0.qs.len()).map(IType::var).collect(),
+                                asig.0.qs.iter().map(|p| p.0.clone()),
+                                asig0.into(),
+                            ),
+                        ),
+                    ),
+                    asig.into(),
+                    s1.compose(s2),
+                ))
             }
             Int(n) => Ok((ITerm::Int(n), IType::Int, Subst::default())),
             Bool(b) => Ok((ITerm::Bool(b), IType::Bool, Subst::default())),
@@ -1366,35 +2070,68 @@ impl SemanticSig {
         SemanticSig::AtomicSig(Box::new(Existential(Quantified { qs, body })))
     }
 
-    fn lookup_instantiation(&self, ssig: &SemanticSig, v: internal::Variable) -> Option<IType> {
+    // TODO: remove this function.
+    fn default_atomic_term(ty: IType) -> Self {
+        // An arbitrary value.
+        SemanticSig::AtomicTerm(SemanticPath::from(100_000), ty)
+    }
+
+    fn lookup_instantiation(&self, ssig: &SemanticSig, mut sp: SemanticPath) -> Option<IType> {
         use SemanticSig::*;
         match (self, ssig) {
+            (&AtomicTerm(ref sp1, _), &AtomicTerm(ref sp2, _)) => {
+                if sp.equal(sp2) {
+                    Some(sp1.clone().into())
+                } else {
+                    None
+                }
+            }
             (&AtomicType(ref ty1, _), &AtomicType(ref ty2, _)) => {
                 // Kind equality is later tested (maybe).
-                match *ty2 {
-                    IType::Var(v0) if v0 == v => Some(ty1.clone()),
-                    _ => None,
+                if sp.equal_type(ty2) {
+                    Some(ty1.clone())
+                } else {
+                    None
                 }
             }
             (&StructureSig(ref m1), &StructureSig(ref m2)) => {
                 for (l, ssig2) in m2.iter() {
                     if let Some(ssig1) = m1.get(l) {
-                        if let Some(ty) = ssig1.lookup_instantiation(ssig2, v) {
+                        if let Some(ty) = ssig1.lookup_instantiation(ssig2, sp.clone()) {
                             return Some(ty);
                         }
                     }
                 }
                 None
             }
+            (&Applicative(ref u1), &Applicative(ref u2)) => {
+                let self::Applicative(ref ssig11, ref ssig12) = *u1.0.body;
+                let self::Applicative(ref ssig21, ref ssig22) = *u2.0.body;
+                let tys = ssig21.lookup_instantiations(
+                    ssig11,
+                    (0..u1.0.qs.len()).map(internal::Variable::new).collect(),
+                );
+                let mut ssig12 = ssig12.clone();
+                ssig12.apply(&Subst::from_iter(
+                    (0..u1.0.qs.len()).map(internal::Variable::new).zip(tys),
+                ));
+                sp.append((0..u2.0.qs.len()).map(IType::var));
+                let ty = ssig12.lookup_instantiation(ssig22, sp)?;
+                Some(IType::abs(u2.0.qs.iter().rev().map(|p| p.0.clone()), ty))
+            }
             _ => None,
         }
     }
 
-    /// Looks up instantiations.
-    /// Assumes at least `ssig` is *explicit* (see section 5.2).
     fn lookup_instantiations(&self, ssig: &SemanticSig, vs: Vec<internal::Variable>) -> Vec<IType> {
-        vs.iter()
-            .map(|v| self.lookup_instantiation(ssig, *v).expect("not explicit"))
+        vs.into_iter()
+            .scan(ssig.clone(), |ssig, v| {
+                let x = self
+                    .lookup_instantiation(ssig, v.into())
+                    .expect("not explicit");
+                ssig.apply(&Subst::from_iter(Some((v, x.clone()))));
+                Some(x)
+            })
             .collect()
     }
 
@@ -1470,6 +2207,27 @@ impl SemanticSig {
         }
         (Vec::from(ks), Subst::from_iter(m))
     }
+
+    fn skolemize(&mut self, m: usize, n: usize) {
+        use internal::Variable::Variable as V;
+
+        // TODO: `Subst::compose` may be useful.
+        let s = Subst::from_iter(
+            (0..n)
+                .map(|i| (i, i + m))
+                .chain((0..m).map(|i| (n + i, i)))
+                .map(|(i, j)| (V(i), IType::var(j))),
+        );
+        self.apply(&s);
+
+        let s = Subst::from_iter((0..n).map(|i| {
+            (
+                V(m + i),
+                (0..m).fold(IType::var(m + i), |acc, j| IType::app(acc, IType::var(j))),
+            )
+        }));
+        self.apply(&s);
+    }
 }
 
 impl Sig {
@@ -1477,8 +2235,12 @@ impl Sig {
         Sig::Path(Path::from(m))
     }
 
-    fn fun(id: Ident, sig1: Sig, sig2: Sig) -> Self {
-        Sig::Fun(id, Box::new(sig1), Box::new(sig2))
+    fn generative(id: Ident, sig1: Sig, sig2: Sig) -> Self {
+        Sig::Generative(id, Box::new(sig1), Box::new(sig2))
+    }
+
+    fn applicative(id: Ident, sig1: Sig, sig2: Sig) -> Self {
+        Sig::Applicative(id, Box::new(sig1), Box::new(sig2))
     }
 
     fn r#where(sig: Sig, p: Proj<Ident>, ty: Type) -> Self {
@@ -1500,6 +2262,104 @@ impl Module {
     }
 }
 
+trait Functional {
+    type Range: Substitution + Subtype;
+
+    fn get_function(self) -> (SemanticSig, Self::Range);
+    fn ref_function(&self) -> (&SemanticSig, &Self::Range);
+}
+
+impl Functional for Fun {
+    type Range = AbstractSig;
+
+    fn get_function(self) -> (SemanticSig, Self::Range) {
+        (self.0, self.1)
+    }
+
+    fn ref_function(&self) -> (&SemanticSig, &Self::Range) {
+        (&self.0, &self.1)
+    }
+}
+
+impl Functional for Applicative {
+    type Range = SemanticSig;
+
+    fn get_function(self) -> (SemanticSig, Self::Range) {
+        (self.0, self.1)
+    }
+
+    fn ref_function(&self) -> (&SemanticSig, &Self::Range) {
+        (&self.0, &self.1)
+    }
+}
+
+trait Functorize {
+    fn get_function(self) -> (SemanticSig, AbstractSig);
+}
+
+impl Functorize for Fun {
+    fn get_function(self) -> (SemanticSig, AbstractSig) {
+        (self.0, self.1)
+    }
+}
+
+impl Functorize for Applicative {
+    fn get_function(self) -> (SemanticSig, AbstractSig) {
+        (self.0, Existential::from(self.1))
+    }
+}
+
+impl Purity {
+    /// # Examples
+    ///
+    /// ```
+    /// use modules::rrd2014::*;
+    /// use Purity::*;
+    ///
+    /// assert_eq!(Pure.join(Pure), Pure);
+    /// assert_eq!(Pure.join(Impure), Impure);
+    /// assert_eq!(Impure.join(Pure), Impure);
+    /// assert_eq!(Impure.join(Impure), Impure);
+    /// ```
+    pub fn join(self, p: Purity) -> Self {
+        self.max(p)
+    }
+
+    fn is_pure(self) -> bool {
+        self == Purity::Pure
+    }
+
+    fn is_impure(self) -> bool {
+        self == Purity::Impure
+    }
+}
+
+impl SemanticPath {
+    pub fn equal(&self, sp: &SemanticPath) -> bool {
+        self.v == sp.v
+            && self.tys.len() == sp.tys.len()
+            && self
+                .tys
+                .iter()
+                .zip(sp.tys.iter())
+                .all(|(ty1, ty2)| ty1.equal(ty2))
+    }
+
+    pub fn equal_type(&self, ty: &IType) -> bool {
+        self.tys
+            .iter()
+            .fold(IType::Var(self.v), |acc, ty| IType::app(acc, ty.clone()))
+            .equal(ty)
+    }
+
+    fn append<I>(&mut self, tys: I)
+    where
+        I: IntoIterator<Item = IType>,
+    {
+        self.tys.extend(tys);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1508,7 +2368,6 @@ mod tests {
     fn env_insert() {
         use internal::Kind::*;
         use internal::*;
-        use SemanticSig::*;
 
         let mut env: Env<SemanticSig, _> = Env::default();
 
@@ -1519,10 +2378,13 @@ mod tests {
         );
         assert_eq!(env.lookup_type(Variable::new(1)), Ok((Mono, "s")));
 
-        env.insert_value(Name::new("x".to_string()), AtomicTerm(Type::Int));
+        env.insert_value(
+            Name::new("x".to_string()),
+            SemanticSig::default_atomic_term(Type::Int),
+        );
         assert_eq!(
             env.lookup_value(Variable::new(0)),
-            Ok(AtomicTerm(Type::Int))
+            Ok(SemanticSig::default_atomic_term(Type::Int))
         );
     }
 
@@ -1539,6 +2401,14 @@ mod tests {
             let mut env = Env::default();
             let p = $x.elaborate(&mut env).unwrap();
             assert_eq!((p.0, p.1), ($r1, $r2));
+        }};
+    }
+
+    macro_rules! assert_elaborate_binding_ok {
+        ($x:expr, $r:expr) => {{
+            let mut env = Env::default();
+            let p = $x.elaborate(&mut env).unwrap();
+            assert_eq!(p.1, $r);
         }};
     }
 
@@ -1612,7 +2482,10 @@ mod tests {
             (
                 ITerm::abs(
                     IType::generated_var(0),
-                    ITerm::r#let(ITerm::var(0), ITerm::var(0)),
+                    ITerm::r#let(
+                        ITerm::abs(IType::generated_var(0), ITerm::var(0)),
+                        ITerm::app(ITerm::var(0), ITerm::var(1))
+                    ),
                 ),
                 IType::fun(IType::generated_var(0), IType::generated_var(0))
             )
@@ -1626,32 +2499,29 @@ mod tests {
         use IKind::*;
         use SemanticSig::*;
 
-        assert_elaborate_ok_2!(
+        assert_elaborate_binding_ok!(
             Val(Ident::from("x"), Expr::Int(23)),
-            (
-                ITerm::record(vec![(Label::from("x"), ITerm::Int(23))]),
-                Existential::from(HashMap::from_iter(vec![(
+            (Existential::new(
+                vec![(Mono, "x".into())],
+                HashMap::from_iter(vec![(
                     Label::from("x"),
-                    AtomicTerm(IType::Int)
-                )]))
-            )
+                    AtomicTerm(SemanticPath::from(0), IType::Int)
+                )])
+            ))
         );
 
-        assert_elaborate_ok_2!(
+        assert_elaborate_binding_ok!(
             Val(Ident::from("x"), Expr::abs(Ident::from("y"), Expr::Int(22))),
-            (
-                ITerm::record(vec![(
+            (Existential::new(
+                vec![(Mono, "x".into())],
+                HashMap::from_iter(vec![(
                     Label::from("x"),
-                    ITerm::poly(vec![Mono], ITerm::abs(IType::var(0), ITerm::Int(22)))
-                )]),
-                Existential::from(HashMap::from_iter(vec![(
-                    Label::from("x"),
-                    AtomicTerm(IType::forall(
-                        vec![Mono],
-                        IType::fun(IType::var(0), IType::Int)
-                    ))
-                )]))
-            )
+                    AtomicTerm(
+                        SemanticPath::from(0),
+                        IType::forall(vec![Mono], IType::fun(IType::var(0), IType::Int))
+                    )
+                )])
+            ))
         );
 
         assert_elaborate_ok_2!(
@@ -1694,10 +2564,7 @@ mod tests {
 
     #[test]
     fn elaborate_module() {
-        use super::Ident as I;
         use super::Module::*;
-        use super::Type as T;
-        use Binding::*;
         use SemanticSig::*;
 
         assert_elaborate_ok_2!(
@@ -1706,209 +2573,6 @@ mod tests {
                 ITerm::record(None),
                 Existential::from(StructureSig(HashMap::new()))
             )
-        );
-
-        assert_elaborate_ok_2!(
-            Seq(vec![Type(I::from("t"), T::Int)]),
-            (
-                ITerm::r#let(
-                    ITerm::record(vec![(
-                        Label::from("t"),
-                        ITerm::poly(
-                            vec![IKind::fun(IKind::Mono, IKind::Mono)],
-                            ITerm::abs(IType::app(IType::var(0), IType::Int), ITerm::var(0))
-                        )
-                    )]),
-                    ITerm::r#let(
-                        ITerm::proj(ITerm::var(0), Some(Label::from("t"))),
-                        ITerm::record(vec![(
-                            Label::from("t"),
-                            ITerm::proj(ITerm::var(1), Some(Label::from("t")))
-                        )])
-                    )
-                ),
-                Existential::from(StructureSig(HashMap::from_iter(vec![(
-                    Label::from("t"),
-                    AtomicType(IType::Int, IKind::Mono)
-                )])))
-            )
-        );
-
-        assert_elaborate_ok_2!(
-            Seq(vec![
-                Type(I::from("t"), T::Int),
-                Type(I::from("s"), T::path(Ident(I::from("t"))))
-            ]),
-            (
-                ITerm::r#let(
-                    ITerm::record(vec![(
-                        Label::from("t"),
-                        ITerm::poly(
-                            vec![IKind::fun(IKind::Mono, IKind::Mono)],
-                            ITerm::abs(IType::app(IType::var(0), IType::Int), ITerm::var(0))
-                        )
-                    )]),
-                    ITerm::r#let(
-                        ITerm::proj(ITerm::var(0), Some(Label::from("t"))),
-                        ITerm::r#let(
-                            ITerm::record(vec![(
-                                Label::from("s"),
-                                ITerm::poly(
-                                    vec![IKind::fun(IKind::Mono, IKind::Mono)],
-                                    ITerm::abs(
-                                        IType::app(IType::var(0), IType::Int),
-                                        ITerm::var(0)
-                                    )
-                                )
-                            )]),
-                            ITerm::r#let(
-                                ITerm::proj(ITerm::var(0), Some(Label::from("s"))),
-                                ITerm::record(vec![
-                                    (
-                                        Label::from("t"),
-                                        ITerm::proj(ITerm::var(3), Some(Label::from("t")))
-                                    ),
-                                    (
-                                        Label::from("s"),
-                                        ITerm::proj(ITerm::var(1), Some(Label::from("s")))
-                                    )
-                                ])
-                            )
-                        )
-                    )
-                ),
-                Existential::from(StructureSig(HashMap::from_iter(vec![
-                    (Label::from("t"), AtomicType(IType::Int, IKind::Mono)),
-                    (Label::from("s"), AtomicType(IType::Int, IKind::Mono))
-                ])))
-            )
-        );
-
-        assert_elaborate_ok_2!(
-            Seq(vec![
-                Type(I::from("t"), T::Int),
-                Type(
-                    I::from("s"),
-                    T::fun(T::path(Ident(I::from("t"))), T::path(Ident(I::from("t"))))
-                )
-            ]),
-            (
-                ITerm::r#let(
-                    ITerm::record(vec![(
-                        Label::from("t"),
-                        ITerm::poly(
-                            vec![IKind::fun(IKind::Mono, IKind::Mono)],
-                            ITerm::abs(IType::app(IType::var(0), IType::Int), ITerm::var(0))
-                        )
-                    )]),
-                    ITerm::r#let(
-                        ITerm::proj(ITerm::var(0), Some(Label::from("t"))),
-                        ITerm::r#let(
-                            ITerm::record(vec![(
-                                Label::from("s"),
-                                ITerm::poly(
-                                    vec![IKind::fun(IKind::Mono, IKind::Mono)],
-                                    ITerm::abs(
-                                        IType::app(
-                                            IType::var(0),
-                                            IType::fun(IType::Int, IType::Int)
-                                        ),
-                                        ITerm::var(0)
-                                    )
-                                )
-                            )]),
-                            ITerm::r#let(
-                                ITerm::proj(ITerm::var(0), Some(Label::from("s"))),
-                                ITerm::record(vec![
-                                    (
-                                        Label::from("t"),
-                                        ITerm::proj(ITerm::var(3), Some(Label::from("t")))
-                                    ),
-                                    (
-                                        Label::from("s"),
-                                        ITerm::proj(ITerm::var(1), Some(Label::from("s")))
-                                    )
-                                ])
-                            )
-                        )
-                    )
-                ),
-                Existential::from(StructureSig(HashMap::from_iter(vec![
-                    (Label::from("t"), AtomicType(IType::Int, IKind::Mono)),
-                    (
-                        Label::from("s"),
-                        AtomicType(IType::fun(IType::Int, IType::Int), IKind::Mono)
-                    )
-                ])))
-            )
-        );
-
-        let id = I::from;
-        let l = internal::Label::from;
-        let proj = |x, y| ITerm::proj(x, Some(y));
-
-        assert_elaborate_ok_2!(
-            Seq(vec![
-                Module(id("M"), Seq(vec![])),
-                Module(id("N"), Seal(id("M"), Sig::Seq(vec![])))
-            ]),
-            (
-                ITerm::r#let(
-                    ITerm::r#let(
-                        ITerm::record(None),
-                        ITerm::record(Some((l("M"), ITerm::var(0))))
-                    ),
-                    ITerm::r#let(
-                        proj(ITerm::var(0), l("M")),
-                        ITerm::r#let(
-                            ITerm::r#let(
-                                ITerm::app(
-                                    ITerm::abs(IType::record(None), ITerm::record(None)),
-                                    ITerm::var(0)
-                                ),
-                                ITerm::record(Some((l("N"), ITerm::var(0))))
-                            ),
-                            ITerm::r#let(
-                                proj(ITerm::var(0), l("N")),
-                                ITerm::record(vec![
-                                    (l("M"), proj(ITerm::var(3), l("M"))),
-                                    (l("N"), proj(ITerm::var(1), l("N"))),
-                                ])
-                            )
-                        )
-                    )
-                ),
-                Existential::from(SemanticSig::structure_sig(vec![
-                    (l("M"), SemanticSig::structure_sig(None)),
-                    (l("N"), SemanticSig::structure_sig(None))
-                ]))
-            )
-        );
-
-        assert_eq!(
-            Seq(vec![
-                Val(id("f"), Expr::abs(id("x"), Expr::path(Ident(id("x"))))),
-                Val(
-                    id("y"),
-                    Expr::app(
-                        Expr::path(Ident(id("f"))),
-                        Expr::app(Expr::path(Ident(id("f"))), Expr::Int(1))
-                    )
-                )
-            ])
-            .elaborate(&mut Env::default())
-            .ok()
-            .map(|p| p.1),
-            Some(Existential::from(SemanticSig::structure_sig(vec![
-                (l("y"), SemanticSig::AtomicTerm(IType::Int)),
-                (
-                    l("f"),
-                    SemanticSig::AtomicTerm(IType::forall(
-                        vec![IKind::Mono],
-                        IType::fun(IType::var(0), IType::var(0))
-                    ))
-                ),
-            ])))
         );
     }
 
@@ -1922,7 +2586,13 @@ mod tests {
 
         assert_elaborate_ok_1!(
             Val(id("a"), Type::Int),
-            Existential::from(HashMap::from_iter(Some((l("a"), AtomicTerm(IType::Int)))))
+            Existential(Quantified {
+                qs: vec![(IKind::Mono, "a".into())],
+                body: HashMap::from_iter(Some((
+                    l("a"),
+                    SemanticSig::AtomicTerm(SemanticPath::from(0), IType::Int)
+                )))
+            })
         );
 
         assert_elaborate_ok_1!(
@@ -1956,26 +2626,38 @@ mod tests {
 
         assert_elaborate_ok_1!(
             Seq(vec![Val(id("a"), Type::Int)]),
-            Existential::from(StructureSig(HashMap::from_iter(vec![(
-                l("a"),
-                AtomicTerm(IType::Int)
-            )])))
+            Existential::new(
+                vec![(IKind::Mono, "a".into())],
+                StructureSig(HashMap::from_iter(vec![(
+                    l("a"),
+                    SemanticSig::AtomicTerm(SemanticPath::from(0), IType::Int)
+                )]))
+            )
         );
 
         assert_elaborate_ok_1!(
             Seq(vec![Val(id("a"), Type::Int), Val(id("b"), Type::Int)]),
-            Existential::from(StructureSig(HashMap::from_iter(vec![
-                (l("a"), AtomicTerm(IType::Int)),
-                (l("b"), AtomicTerm(IType::Int))
-            ])))
+            Existential::new(
+                vec![(IKind::Mono, "a".into()), (IKind::Mono, "b".into()),],
+                StructureSig(HashMap::from_iter(vec![
+                    (l("a"), AtomicTerm(SemanticPath::from(1), IType::Int)),
+                    (l("b"), AtomicTerm(SemanticPath::from(0), IType::Int))
+                ]))
+            )
         );
 
         assert_elaborate_ok_1!(
             Seq(vec![Val(id("a"), Type::Int), ManType(id("b"), Type::Int)]),
-            Existential::from(StructureSig(HashMap::from_iter(vec![
-                (l("a"), AtomicTerm(IType::Int)),
-                (l("b"), AtomicType(IType::Int, IKind::Mono))
-            ])))
+            Existential::new(
+                vec![(IKind::Mono, "a".into())],
+                StructureSig(HashMap::from_iter(vec![
+                    (
+                        l("a"),
+                        SemanticSig::AtomicTerm(SemanticPath::from(0), IType::Int)
+                    ),
+                    (l("b"), AtomicType(IType::Int, IKind::Mono))
+                ]))
+            )
         );
 
         assert_elaborate_ok_1!(
@@ -2081,14 +2763,14 @@ mod tests {
         let l = internal::Label::from;
 
         assert_subtype_ok!(
-            AtomicTerm(Int),
-            AtomicTerm(Int),
+            SemanticSig::default_atomic_term(Int),
+            SemanticSig::default_atomic_term(Int),
             Term::abs(Int, Term::app(Term::abs(Int, Term::var(0)), Term::var(0)))
         );
 
         assert_subtype_err!(
-            AtomicTerm(Int),
-            AtomicTerm(Type::fun(Int, Int)),
+            SemanticSig::default_atomic_term(Int),
+            SemanticSig::default_atomic_term(Type::fun(Int, Int)),
             TypeError::NotSubtype(Int, Type::fun(Int, Int))
         );
 
@@ -2126,14 +2808,14 @@ mod tests {
         );
 
         assert_subtype_ok!(
-            SemanticSig::structure_sig(Some((l("a"), AtomicTerm(Int)))),
+            SemanticSig::structure_sig(Some((l("a"), SemanticSig::default_atomic_term(Int)))),
             SemanticSig::structure_sig(None),
             Term::abs(Type::record(Some((l("a"), Int))), Term::record(None))
         );
 
         assert_subtype_ok!(
-            SemanticSig::structure_sig(Some((l("a"), AtomicTerm(Int)))),
-            SemanticSig::structure_sig(Some((l("a"), AtomicTerm(Int)))),
+            SemanticSig::structure_sig(Some((l("a"), SemanticSig::default_atomic_term(Int)))),
+            SemanticSig::structure_sig(Some((l("a"), SemanticSig::default_atomic_term(Int)))),
             Term::abs(
                 Type::record(Some((l("a"), Int))),
                 Term::record(Some((
@@ -2149,11 +2831,14 @@ mod tests {
         let t1 = Term::abs(Int, Term::app(Term::abs(Int, Term::var(0)), Term::var(0)));
         assert_subtype_ok!(
             SemanticSig::structure_sig(vec![
-                (l("a"), AtomicTerm(Int)),
-                (l("b"), AtomicTerm(Int)),
-                (l("c"), AtomicTerm(Int))
+                (l("a"), SemanticSig::default_atomic_term(Int)),
+                (l("b"), SemanticSig::default_atomic_term(Int)),
+                (l("c"), SemanticSig::default_atomic_term(Int))
             ]),
-            SemanticSig::structure_sig(vec![(l("a"), AtomicTerm(Int)), (l("b"), AtomicTerm(Int))]),
+            SemanticSig::structure_sig(vec![
+                (l("a"), SemanticSig::default_atomic_term(Int)),
+                (l("b"), SemanticSig::default_atomic_term(Int))
+            ]),
             Term::abs(
                 Type::record(vec![(l("a"), Int), (l("b"), Int), (l("c"), Int)]),
                 Term::record(vec![
@@ -2180,8 +2865,14 @@ mod tests {
 
         let l = Label::from;
 
-        assert_eq!(AtomicTerm(Int).first_apper(Variable(0)), None);
-        assert_eq!(AtomicTerm(Type::var(0)).first_apper(Variable(0)), None);
+        assert_eq!(
+            SemanticSig::default_atomic_term(Int).first_apper(Variable(0)),
+            None
+        );
+        assert_eq!(
+            SemanticSig::default_atomic_term(Type::var(0)).first_apper(Variable(0)),
+            None
+        );
 
         assert_eq!(AtomicType(Int, Mono).first_apper(Variable(0)), None);
         assert_eq!(
@@ -2265,7 +2956,7 @@ mod tests {
         let l = Label::from;
 
         assert_eq!(
-            AtomicTerm(Int).sort_quantifiers::<()>(vec![]),
+            SemanticSig::default_atomic_term(Int).sort_quantifiers::<()>(vec![]),
             (vec![], Subst::from_iter(vec![]))
         );
 
@@ -2373,6 +3064,177 @@ mod tests {
                     (Variable(2), Type::var(0)),
                 ])
             )
+        );
+    }
+
+    #[test]
+    fn lifted_by() {
+        use IKind as Kind;
+        use IKind::Mono;
+
+        fn sf(s: &str) -> StemFrom {
+            StemFrom::from(Ident::from(s))
+        }
+
+        assert_eq!(vec![].lifted_by(&vec![]), vec![]);
+
+        assert_eq!(vec![].lifted_by(&vec![(Mono, sf("b"))]), vec![]);
+
+        assert_eq!(
+            vec![(Mono, sf("a"))].lifted_by(&vec![]),
+            vec![(Mono, sf("a"))]
+        );
+
+        assert_eq!(
+            vec![(Mono, sf("a"))].lifted_by(&vec![(Mono, sf("b"))]),
+            vec![(Kind::fun(Mono, Mono), sf("a"))]
+        );
+
+        assert_eq!(
+            vec![(Mono, sf("a"))]
+                .lifted_by(&vec![(Mono, sf("b")), (Kind::fun(Mono, Mono), sf("c"))]),
+            vec![(
+                Kind::fun(Kind::fun(Mono, Mono), Kind::fun(Mono, Mono)),
+                sf("a")
+            )]
+        );
+
+        assert_eq!(
+            vec![(Mono, sf("a"))]
+                .lifted_by(&vec![(Kind::fun(Mono, Mono), sf("c")), (Mono, sf("b"))]),
+            vec![(
+                Kind::fun(Mono, Kind::fun(Kind::fun(Mono, Mono), Mono)),
+                sf("a")
+            )]
+        );
+
+        assert_eq!(
+            vec![(Mono, sf("a")), (Kind::fun(Mono, Mono), sf("d"))]
+                .lifted_by(&vec![(Kind::fun(Mono, Mono), sf("c")), (Mono, sf("b"))]),
+            vec![
+                (
+                    Kind::fun(Mono, Kind::fun(Kind::fun(Mono, Mono), Mono)),
+                    sf("a")
+                ),
+                (
+                    Kind::fun(
+                        Mono,
+                        Kind::fun(Kind::fun(Mono, Mono), Kind::fun(Mono, Mono))
+                    ),
+                    sf("d")
+                )
+            ]
+        );
+    }
+
+    macro_rules! assert_skolemize {
+        ($ssig:expr, $m:expr, $n:expr, $r:expr) => {{
+            let mut ssig = $ssig;
+            ssig.skolemize($m, $n);
+            assert_eq!(ssig, $r);
+        }};
+    }
+
+    #[test]
+    fn skolemize() {
+        use IType::Int;
+
+        let var = IType::var;
+        let app = IType::app;
+
+        assert_skolemize!(
+            SemanticSig::default_atomic_term(Int),
+            0,
+            0,
+            SemanticSig::default_atomic_term(Int)
+        );
+
+        assert_skolemize!(
+            SemanticSig::default_atomic_term(var(0)),
+            0,
+            0,
+            SemanticSig::default_atomic_term(var(0))
+        );
+        assert_skolemize!(
+            SemanticSig::default_atomic_term(var(0)),
+            1,
+            0,
+            SemanticSig::default_atomic_term(var(0))
+        );
+        assert_skolemize!(
+            SemanticSig::default_atomic_term(var(0)),
+            0,
+            1,
+            SemanticSig::default_atomic_term(var(0))
+        );
+        assert_skolemize!(
+            SemanticSig::default_atomic_term(var(0)),
+            1,
+            1,
+            SemanticSig::default_atomic_term(app(var(1), var(0)))
+        );
+
+        assert_skolemize!(
+            SemanticSig::default_atomic_term(var(1)),
+            0,
+            0,
+            SemanticSig::default_atomic_term(var(1))
+        );
+        assert_skolemize!(
+            SemanticSig::default_atomic_term(var(1)),
+            1,
+            0,
+            SemanticSig::default_atomic_term(var(1))
+        );
+        assert_skolemize!(
+            SemanticSig::default_atomic_term(var(1)),
+            0,
+            1,
+            SemanticSig::default_atomic_term(var(1))
+        );
+        assert_skolemize!(
+            SemanticSig::default_atomic_term(var(1)),
+            1,
+            1,
+            SemanticSig::default_atomic_term(var(0))
+        );
+
+        assert_skolemize!(
+            SemanticSig::default_atomic_term(var(0)),
+            2,
+            1,
+            SemanticSig::default_atomic_term(app(app(var(2), var(0)), var(1)))
+        );
+        assert_skolemize!(
+            SemanticSig::default_atomic_term(var(0)),
+            1,
+            2,
+            SemanticSig::default_atomic_term(app(var(1), var(0)))
+        );
+        assert_skolemize!(
+            SemanticSig::default_atomic_term(var(0)),
+            2,
+            2,
+            SemanticSig::default_atomic_term(app(app(var(2), var(0)), var(1)))
+        );
+
+        assert_skolemize!(
+            SemanticSig::default_atomic_term(var(1)),
+            2,
+            1,
+            SemanticSig::default_atomic_term(var(0))
+        );
+        assert_skolemize!(
+            SemanticSig::default_atomic_term(var(1)),
+            1,
+            2,
+            SemanticSig::default_atomic_term(app(var(2), var(0)))
+        );
+        assert_skolemize!(
+            SemanticSig::default_atomic_term(var(1)),
+            2,
+            2,
+            SemanticSig::default_atomic_term(app(app(var(3), var(0)), var(1)))
         );
     }
 }
