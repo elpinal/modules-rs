@@ -1413,7 +1413,7 @@ impl Elaboration for Module {
                         tys.into_iter()
                             .map(|ty| IType::abs_env(&*env, ty))
                             .collect(),
-                        asig.0.qs.iter().map(|p| p.0.clone()),
+                        asig.0.qs.iter().map(|p| IKind::fun_env(&*env, p.0.clone())),
                         IType::forall_env(&*env, asig.0.body.clone().into()),
                     ),
                     Existential(Quantified { qs, body }),

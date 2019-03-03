@@ -47,4 +47,24 @@ fn test_execution() {
            end
          end"
     );
+
+    assert_exec!(
+        "struct
+           module M = fun X : sig end =>
+             ( struct
+               module M = struct type t = int end
+             end
+             ).M
+
+           module E = struct end
+
+           type t = (M E).t
+           type s = (M E).t
+
+           module W = struct
+             val x = λa.a
+             val f = λa.a
+           end
+         end"
+    );
 }
