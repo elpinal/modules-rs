@@ -1959,11 +1959,13 @@ impl Expr {
                 let s = s1.compose(s2).compose(s3);
                 Ok((ITerm::app(t1, t2), v, s))
             }
-            Path(ref p) => {
-                let (t, asig, s, p) = p.0.elaborate(env)?;
+            Path(ref path) => {
+                let (t, asig, s, p) = path.0.elaborate(env)?;
                 let qs = asig.0.qs;
-                let (_, ty) = asig.0.body.get_atomic_term()?;
-                // Need shift?
+                let (_, mut ty) = asig.0.body.get_atomic_term()?;
+                if let Some(n) = ty.shift_neg(qs.len()) {
+                    return Err(TypeError::LeakOfAbstractType(n, path.clone()));
+                }
                 ty.kind_of(env)
                     .map_err(TypeError::KindError)?
                     .mono()
