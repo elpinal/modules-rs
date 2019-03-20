@@ -220,6 +220,12 @@ pub enum TypeError {
 
     #[fail(display = "value identity mismatch: {:?} and {:?}", _0, _1)]
     SemanticPathMismatch(SemanticPath, SemanticPath),
+
+    #[fail(
+        display = "local abstract type must not leak from its scope: variable {}, which is in the type of {:?}",
+        _0, _1
+    )]
+    LeakOfAbstractType(usize, Path),
 }
 
 impl From<EnvError> for TypeError {
@@ -1554,9 +1560,11 @@ impl Elaboration for Path {
 
     fn elaborate(&self, env: &mut Env) -> Result<Self::Output, Self::Error> {
         let (t, asig, s, p) = self.0.elaborate(env)?;
-        // TODO: Need shift?
-        IType::from(asig.0.body.clone())
-            .kind_of(env)
+        let mut ty = IType::from(asig.0.body.clone());
+        if let Some(n) = ty.shift_neg(asig.0.qs.len()) {
+            return Err(TypeError::LeakOfAbstractType(n, self.clone()));
+        }
+        ty.kind_of(env)
             .map_err(TypeError::KindError)?
             .mono()
             .map_err(TypeError::NotMono)?;

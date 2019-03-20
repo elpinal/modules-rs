@@ -228,14 +228,14 @@ pub trait Shift {
 
 impl Shift for Type {
     fn shift_above(&mut self, c: usize, d: isize) {
-        let f = |c0, v: usize| {
+        let mut f = |c0, v: usize| {
             if c0 <= v {
-                Type::Var(V(v).add(d))
+                Ok(Type::Var(V(v).add(d)))
             } else {
-                Type::Var(V(v))
+                Ok(Type::Var(V(v)))
             }
         };
-        self.map(&f, c)
+        self.map_never_error(&mut f, c);
     }
 }
 
@@ -735,11 +735,11 @@ impl<T> FromIterator<(Label, T)> for Record<T> {
 }
 
 impl Record<Type> {
-    fn map<F>(&mut self, f: &F, c: usize)
+    fn map<E, F>(&mut self, f: &mut F, c: usize) -> Result<(), E>
     where
-        F: Fn(usize, usize) -> Type,
+        F: FnMut(usize, usize) -> Result<Type, E>,
     {
-        self.0.values_mut().for_each(|ty| ty.map(f, c));
+        self.0.values_mut().try_for_each(|ty| ty.map(f, c))
     }
 }
 
@@ -985,55 +985,80 @@ impl Type {
         ks.into_iter().fold(ty, |ty, k| Type::Abs(k, Box::new(ty)))
     }
 
-    fn map<F>(&mut self, f: &F, c: usize)
+    fn map<E, F>(&mut self, f: &mut F, c: usize) -> Result<(), E>
     where
-        F: Fn(usize, usize) -> Type,
+        F: FnMut(usize, usize) -> Result<Type, E>,
     {
         use Type::*;
         match *self {
             Var(v) => match v {
                 V(v) => {
-                    let ty = f(c, v);
+                    let ty = f(c, v)?;
                     *self = ty;
                 }
                 Variable::Generated(_) => (),
             },
             Fun(ref mut ty1, ref mut ty2) => {
-                ty1.map(f, c);
-                ty2.map(f, c);
+                ty1.map(f, c)?;
+                ty2.map(f, c)?;
             }
-            Record(ref mut r) => r.map(f, c),
+            Record(ref mut r) => r.map(f, c)?,
             Forall(ref mut k, ref mut ty) => {
                 k.map(f, c); // Currently, kinds do not depend on types, though.
-                ty.map(f, c + 1);
+                ty.map(f, c + 1)?;
             }
             Some(ref mut k, ref mut ty) => {
                 k.map(f, c); // Currently, kinds do not depend on types, though.
-                ty.map(f, c + 1);
+                ty.map(f, c + 1)?;
             }
             Abs(ref mut k, ref mut ty) => {
                 k.map(f, c); // Currently, kinds do not depend on types, though.
-                ty.map(f, c + 1);
+                ty.map(f, c + 1)?;
             }
             App(ref mut ty1, ref mut ty2) => {
-                ty1.map(f, c);
-                ty2.map(f, c);
+                ty1.map(f, c)?;
+                ty2.map(f, c)?;
             }
             Int | Bool => (),
+        }
+        Ok(())
+    }
+
+    fn map_never_error<F>(&mut self, f: &mut F, c: usize)
+    where
+        F: FnMut(usize, usize) -> Result<Type, !>,
+    {
+        self.map(f, c).unwrap();
+    }
+
+    pub(crate) fn shift_neg(&mut self, d: usize) -> Option<usize> {
+        let mut f = |c0: usize, v: usize| {
+            if c0 + d <= v {
+                Ok(Type::var(v - d))
+            } else if v < c0 {
+                Ok(Type::var(v))
+            } else {
+                Err(v)
+            }
+        };
+        if let Err(n) = self.map(&mut f, 0) {
+            Some(n)
+        } else {
+            None
         }
     }
 
     fn subst(&mut self, j: usize, ty: &Type) {
-        let f = |c: usize, v: usize| {
+        let mut f = |c: usize, v: usize| {
             if c + j == v {
                 let mut ty = ty.clone();
                 ty.shift(isize::try_from(c).unwrap());
-                ty
+                Ok(ty)
             } else {
-                Type::Var(V(v))
+                Ok(Type::Var(V(v)))
             }
         };
-        self.map(&f, 0)
+        self.map_never_error(&mut f, 0);
     }
 
     fn subst_top(&mut self, ty: &mut Type) {
@@ -1043,16 +1068,16 @@ impl Type {
     }
 
     fn subst_shift(&mut self, j: usize, ty: &Type, d: isize) {
-        let f = |c: usize, v: usize| {
+        let mut f = |c: usize, v: usize| {
             if c + j == v {
                 let mut ty = ty.clone();
                 ty.shift(isize::try_from(c).unwrap() + d);
-                ty
+                Ok(ty)
             } else {
-                Type::Var(V(v))
+                Ok(Type::Var(V(v)))
             }
         };
-        self.map(&f, 0)
+        self.map_never_error(&mut f, 0);
     }
 
     fn ftv(&self) -> HashSet<Variable> {
