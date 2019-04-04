@@ -1803,6 +1803,7 @@ impl Term {
         match *self {
             Var(v) => Ok(ctx.lookup_value(v)?.into_owned()),
             Abs(ref ty1, ref t) => {
+                // FIXME: `ty1` must be well-kinded.
                 ctx.insert_value(Cow::Borrowed(ty1));
                 let ty2 = t.type_of(ctx)?;
                 ctx.drop_value();
