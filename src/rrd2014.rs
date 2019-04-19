@@ -2125,6 +2125,7 @@ impl SemanticSig {
                 ssig12.apply(&Subst::from_iter(
                     (0..u1.0.qs.len()).map(internal::Variable::new).zip(tys),
                 ));
+                // FIXME: `sp` should be shifted by `u2.0.qs.len()`.
                 sp.append((0..u2.0.qs.len()).map(IType::var));
                 let ty = ssig12.lookup_instantiation(ssig22, sp)?;
                 Some(IType::abs(u2.0.qs.iter().rev().map(|p| p.0.clone()), ty))
