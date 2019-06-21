@@ -1370,7 +1370,7 @@ impl Elaboration for Module {
                         IType::forall_env_purity(
                             env,
                             p_all,
-                            SemanticSig::StructureSig(body0).into(),
+                            SemanticSig::StructureSig(body0).into(), // TODO: perhaps need `shift` to skip unpack-bound type variables.
                         ),
                     ),
                     |t0, BindingInformation { t, n, .. }| ITerm::unpack(t, n, t0),
@@ -1691,6 +1691,7 @@ where
     // contra-variant.
     let (t1, tys) = ssig2.r#match(
         env,
+        // TODO: maybe wrong: needs shift.
         &Existential(Quantified {
             qs: u1.0.qs.clone(),
             body: ssig1,
@@ -1732,6 +1733,7 @@ impl Subtype for AbstractSig {
     fn subtype_of(&self, env: &mut Env, another: &Self) -> Result<ITerm, Self::Error> {
         env.insert_types(self.0.qs.clone().into_iter().map(|(k, s)| (k, Some(s))));
         let ty: IType = self.clone().into();
+        // TODO: maybe wrong: needs shift.
         let (t, tys) = self.0.body.r#match(env, another)?;
         // FIXME: drop types from `env`.
         Ok(ITerm::abs(
